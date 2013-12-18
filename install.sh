@@ -14,10 +14,15 @@ if [ ! -f "qdo" ]; then
 fi
 
 # Copy binary.
+if [ -f "/etc/init/qdo.conf" ]; then
+    service qdo stop
+fi
 cp qdo /usr/bin/qdo
 
 # Setup templates and static files.
-rm -r /opt/qdo/
+if [ -d "/opt/qdo" ]; then
+    rm -r /opt/qdo
+fi
 mkdir /opt/qdo
 cp -r web/template /opt/qdo/
 cp -r web/static /opt/qdo/
