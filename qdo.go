@@ -2,6 +2,9 @@ package main
 
 import (
 	"flag"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/borgenk/qdo/log"
 	"github.com/borgenk/qdo/log/stdout"
@@ -41,5 +44,15 @@ func main() {
 	go web.Run(*optHttpPort, *optHttpDocumentRoot)
 
 	// Launch queue manager.
-	queue.StartManager(*optDbFilepath)
+	manager, err := queue.StartManager(*optDbFilepath)
+	if err != nil {
+		panic("Unable to start manager")
+	}
+
+	exit := make(chan os.Signal, 1)
+	signal.Notify(exit, os.Interrupt, syscall.SIGTERM)
+	<-exit
+
+	log.Info("stopping, please wait..")
+	manager.Stop()
 }

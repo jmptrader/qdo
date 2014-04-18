@@ -42,7 +42,7 @@ func (sched *Scheduler) Start() {
 		// Fetch all tasks scheduled earlier then right now, starting with the
 		// oldest (lowest) possible item.
 		stop := append(sched.Conveyor.waitKeyStart, []byte(fmt.Sprintf("%d", time.Now().Unix()))...)
-		iter := db.NewIterator(nil)
+		iter := db.NewIterator(nil, nil)
 		for iter.Seek(sched.Conveyor.waitKeyStart); iter.Valid(); iter.Next() {
 			k := iter.Key()
 			v := iter.Value()

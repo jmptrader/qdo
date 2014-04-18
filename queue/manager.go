@@ -3,10 +3,7 @@ package queue
 import (
 	"errors"
 	"fmt"
-	"os"
-	"os/signal"
 	"sync"
-	"syscall"
 
 	"github.com/borgenk/qdo/third_party/github.com/syndtr/goleveldb/leveldb"
 	"github.com/borgenk/qdo/third_party/github.com/syndtr/goleveldb/leveldb/comparer"
@@ -16,6 +13,7 @@ import (
 
 type Manager struct {
 	Conveyors map[string]*Conveyor
+	waitGroup *sync.WaitGroup
 }
 
 var (
@@ -26,11 +24,16 @@ var (
 )
 
 // StartManager starts the conveyor state manager.
-func StartManager(dbFilepath string) error {
+func StartManager(dbFilepath string) (*Manager, error) {
 	manager = &Manager{
 		Conveyors: make(map[string]*Conveyor),
+		waitGroup: &sync.WaitGroup{},
 	}
-	return manager.start(dbFilepath)
+	err := manager.start(dbFilepath)
+	if err != nil {
+		return nil, err
+	}
+	return manager, nil
 }
 
 func (man *Manager) start(dbFilepath string) error {
@@ -39,7 +42,6 @@ func (man *Manager) start(dbFilepath string) error {
 		log.Error(fmt.Sprintf("open database file %s failed", dbFilepath), err)
 		return err
 	}
-	defer db.Close()
 
 	storedConveyors, err := getAllStoredConveyors()
 	if err != nil {
@@ -48,20 +50,23 @@ func (man *Manager) start(dbFilepath string) error {
 	}
 	for _, v := range storedConveyors {
 		man.Conveyors[v.ID] = v
-		go man.Conveyors[v.ID].Init().Start()
-
+		go man.Conveyors[v.ID].Init(man.waitGroup).Start()
+		man.waitGroup.Add(1)
 	}
-
-	exit := make(chan os.Signal, 1)
-	signal.Notify(exit, os.Interrupt, syscall.SIGTERM)
-	<-exit
-
 	return nil
+}
+
+func (man *Manager) Stop() {
+	for _, conv := range manager.Conveyors {
+		conv.Stop()
+	}
+	man.waitGroup.Wait()
+	db.Close()
 }
 
 func getAllStoredConveyors() ([]*Conveyor, error) {
 	res := make([]*Conveyor, 0, 1000)
-	iter := db.NewIterator(nil)
+	iter := db.NewIterator(nil, nil)
 	defer iter.Release()
 	for iter.Seek([]byte("c\x00")); iter.Valid(); iter.Next() {
 		k := iter.Key()
@@ -124,7 +129,7 @@ func AddConveyor(conveyorID string, config *Config) error {
 		return errors.New("Manager not initialized")
 	}
 
-	conv := NewConveyor(conveyorID, config)
+	conv := NewConveyor(conveyorID, config, manager.waitGroup)
 	manager.Conveyors[conveyorID] = conv
 
 	b, err := GobEncode(conv)
@@ -134,13 +139,14 @@ func AddConveyor(conveyorID string, config *Config) error {
 	}
 	err = db.Put(conveyorKey(conveyorID), b, nil)
 	if err != nil {
-		log.Error("", err)
+		log.Error("creating new conveyor failed", err)
 		return err
 	}
 
 	go func() {
 		manager.Conveyors[conveyorID].Start()
 	}()
+	manager.waitGroup.Add(1)
 	return nil
 }
 

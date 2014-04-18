@@ -120,29 +120,6 @@ func getConveyor(w http.ResponseWriter, r *http.Request) {
 	ReturnJSON(w, r, res)
 }
 
-// API handler for POST /api/conveyor/{conveyor_id}.
-func updateConveyor(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	id := vars["conveyor_id"]
-	conv, err := queue.GetConveyor(id)
-	if err != nil {
-		http.Error(w, "", http.StatusInternalServerError)
-		return
-	}
-	if conv == nil {
-		http.Error(w, "", http.StatusNotFound)
-		return
-	}
-
-	paused := r.FormValue("paused")
-	if paused == "true" {
-		conv.Pause()
-	} else if paused == "false" {
-		conv.Resume()
-	}
-	ReturnJSON(w, r, nil)
-}
-
 func deleteConveyor(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	id := vars["conveyor_id"]

@@ -14,6 +14,7 @@ import (
 
 	"github.com/borgenk/qdo/third_party/github.com/syndtr/goleveldb/leveldb/comparer"
 	"github.com/borgenk/qdo/third_party/github.com/syndtr/goleveldb/leveldb/opt"
+	"github.com/borgenk/qdo/third_party/github.com/syndtr/goleveldb/leveldb/util"
 
 	"github.com/borgenk/qdo/log"
 )
@@ -35,22 +36,25 @@ const (
 )
 
 type Conveyor struct {
-	Object        string          `json:"object"`  // Define resource.
-	ID            string          `json:"id"`      // Conveyor identification.
-	Created       time.Time       `json:"created"` // Conveyor created timestamp.
-	Changed       time.Time       `json:"changed"` // Conveyor changed timestamp.
-	Paused        bool            `json:"paused"`  // Conveyor is in pause state.
-	Config        Config          `json:"config"`  // Conveyor configurations.
-	Stats         *Stats          `json:"-"`
-	scheduler     *Scheduler      `json:"-"` // Scheduler.
-	newTaskId     chan string     `json:"-"` // Generate new task id by reading from channel.
-	notifyReady   chan int        `json:"-"` // Limit number of simultaneous workers processing tasks.
-	notifySignal  chan convSignal `json:"-"` // Conveyor status signal.
-	cond          *sync.Cond      `json:"-"`
-	queueKeyStart []byte          `json:"-"`
-	queueKeyStop  []byte          `json:"-"`
-	waitKeyStart  []byte          `json:"-"`
-	waitKeyStop   []byte          `json:"-"`
+	Object           string          `json:"object"`  // Define resource.
+	ID               string          `json:"id"`      // Conveyor identification.
+	Created          time.Time       `json:"created"` // Conveyor created timestamp.
+	Changed          time.Time       `json:"changed"` // Conveyor changed timestamp.
+	Paused           bool            `json:"paused"`  // Conveyor is in pause state.
+	Config           Config          `json:"config"`  // Conveyor configurations.
+	Stats            *Stats          `json:"-"`
+	scheduler        *Scheduler      `json:"-"` // Scheduler.
+	newTaskId        chan string     `json:"-"` // Generate new task id by reading from channel.
+	newTask          chan *Task      `json:"-"`
+	notifyReady      chan int        `json:"-"` // Limit number of simultaneous workers processing tasks.
+	notifySignal     chan convSignal `json:"-"` // Conveyor status signal.
+	cond             *sync.Cond      `json:"-"`
+	waitGroup        *sync.WaitGroup `json:"-"`
+	processWaitGroup *sync.WaitGroup `json:"-"`
+	queueKeyStart    []byte          `json:"-"`
+	queueKeyStop     []byte          `json:"-"`
+	waitKeyStart     []byte          `json:"-"`
+	waitKeyStop      []byte          `json:"-"`
 }
 
 type Config struct {
@@ -101,7 +105,7 @@ type Task struct {
 
 // NewConveyor creates a new conveyor ready to handle tasks after running
 // initialize on itself.
-func NewConveyor(conveyorID string, config *Config) *Conveyor {
+func NewConveyor(conveyorID string, config *Config, wg *sync.WaitGroup) *Conveyor {
 	now := time.Now()
 	conv := &Conveyor{
 		Object:  "conveyor",
@@ -111,15 +115,16 @@ func NewConveyor(conveyorID string, config *Config) *Conveyor {
 		Config:  *config,
 		Paused:  false,
 	}
-	conv.Init()
+	conv.Init(wg)
 	return conv
 }
 
 // Init intializes either a new or restored conveyor.
-func (conv *Conveyor) Init() *Conveyor {
+func (conv *Conveyor) Init(wg *sync.WaitGroup) *Conveyor {
 	conv.newTaskId = make(chan string)
+	conv.newTask = make(chan *Task)
 	conv.notifyReady = make(chan int, conv.Config.MaxConcurrent)
-	conv.notifySignal = make(chan convSignal)
+	conv.notifySignal = make(chan convSignal, 1)
 	conv.scheduler = NewScheduler(conv)
 
 	conv.Stats = &Stats{}
@@ -130,6 +135,8 @@ func (conv *Conveyor) Init() *Conveyor {
 
 	var locker sync.Mutex
 	conv.cond = sync.NewCond(&locker)
+	conv.waitGroup = wg
+	conv.processWaitGroup = &sync.WaitGroup{}
 
 	// http://blog.cloudflare.com/go-at-cloudflare
 	go func() {
@@ -144,7 +151,7 @@ func (conv *Conveyor) Init() *Conveyor {
 	return conv
 }
 
-// Starting the conveyor belt and handles retrieving and delegating tasks.
+// Start starts the conveyor belt and handles retrieving and delegating tasks.
 func (conv *Conveyor) Start() error {
 	log.Infof("starting conveyor \"%s\" with %d worker(s)", conv.ID,
 		conv.Config.MaxConcurrent)
@@ -156,84 +163,68 @@ func (conv *Conveyor) Start() error {
 		return err
 	}
 
+	defer conv.waitGroup.Done()
+
 	// Start scheduler for delayed or rescheduled tasks.
 	go conv.scheduler.Start()
 
 	for {
 		select {
-		case sig := <-conv.notifySignal:
-			if sig == stop {
-				log.Infof("stopping conveyor %s", conv.ID)
-				return nil
-			} else if sig == pause {
-				log.Infof("pausing conveyor %s", conv.ID)
-				conv.Paused = true
-			} else if sig == resume {
-				log.Infof("resuming conveyor %s", conv.ID)
-				conv.Paused = false
-			}
+		case <-conv.notifySignal:
+			return nil
 		default:
 		}
 
-		if conv.Paused {
-			time.Sleep(1 * time.Second)
-			continue
+		iter := db.NewIterator(&util.Range{Start: conv.queueKeyStart, Limit: conv.queueKeyStop}, nil)
+		for iter.Next() {
+			select {
+			case <-conv.notifySignal:
+				return nil
+			default:
+			}
+
+			k := iter.Key()
+			v := iter.Value()
+			err := db.Delete(k, nil) // TODO: implement queue delete func.
+			if err != nil {
+				log.Error(fmt.Sprintf("error occur while trying to delete key %s from db", k), err)
+				panic("for now")
+			}
+			conv.Stats.InQueue.Add(-1)
+
+			t := &Task{}
+			err = GobDecode(v, t)
+			if err != nil {
+				log.Error("unable to decode task from db", err)
+				panic("for now")
+			}
+
+			// Block until conveyor is ready to process next task.
+			conv.notifyReady <- 1
+
+			go conv.process(t)
+			conv.processWaitGroup.Add(1)
+
+			// Throttle task invocations per second.
+			if conv.Config.MaxRate > 0 {
+				time.Sleep(time.Duration(
+					time.Second / (time.Duration(conv.Config.MaxRate) * time.Second)))
+			}
 		}
+		iter.Release()
 
-		// Block until conveyor is ready to process next task.
-		conv.notifyReady <- 1
-
-		// Block until next task is recieved (waiting if queue is empty).
-		task := conv.next()
-		go conv.process(task)
-
-		// Throttle task invocations per second.
-		if conv.Config.MaxRate > 0 {
-			time.Sleep(time.Duration(
-				time.Second / (time.Duration(conv.Config.MaxRate) * time.Second)))
-		}
+		conv.cond.L.Lock()
+		conv.cond.Wait()
+		conv.cond.L.Unlock()
 	}
 	return nil
 }
 
-func (conv *Conveyor) next() *Task {
-	conv.cond.L.Lock()
-
-start:
-	iter := db.NewIterator(nil)
-	iter.Seek(conv.queueKeyStart)
-
-	k := iter.Key()
-	if iter.Valid() == false || comparer.DefaultComparer.Compare(k, conv.queueKeyStop) > 0 {
-		iter.Release()
-		conv.cond.Wait()
-		goto start
-	}
-
-	// TODO: implement queue delete func.
-	v := iter.Value()
-	err := db.Delete(k, nil)
-	if err != nil {
-		log.Error(fmt.Sprintf("error occur while trying to delete key %s from db", k), err)
-		panic("for now")
-	}
-	conv.Stats.InQueue.Add(-1)
-
-	t := &Task{}
-	err = GobDecode(v, t)
-	if err != nil {
-		log.Error("unable to decode task from db", err)
-		panic("for now")
-	}
-
-	iter.Release()
-	conv.cond.L.Unlock()
-
-	return t
-}
-
 func (conv *Conveyor) process(task *Task) {
-	defer func() { <-conv.notifyReady }()
+	defer func() {
+		conv.processWaitGroup.Done()
+		<-conv.notifyReady
+	}()
 
 	startTime := time.Now()
 	conv.Stats.TotalProcessed.Add(1)
@@ -321,21 +312,16 @@ func (conv *Conveyor) Stop() {
 	if conv.notifySignal == nil {
 		panic("nil notifySignal")
 	}
-	go func() { conv.notifySignal <- stop }()
-}
+	go func() {
+		conv.notifySignal <- stop
 
-func (conv *Conveyor) Pause() {
-	if conv.notifySignal == nil {
-		panic("nil notifySignal")
-	}
-	go func() { conv.notifySignal <- pause }()
-}
+		// Iterator might be stuck on a "wait for new task signal".
+		conv.cond.L.Lock()
+		conv.cond.Signal()
+		conv.cond.L.Unlock()
 
-func (conv *Conveyor) Resume() {
-	if conv.notifySignal == nil {
-		panic("nil notifySignal")
-	}
-	go func() { conv.notifySignal <- resume }()
+		conv.processWaitGroup.Wait()
+	}()
 }
 
 func (conv *Conveyor) Add(target, payload string, scheduled int64) (*Task, error) {
@@ -371,9 +357,6 @@ func (conv *Conveyor) Add(target, payload string, scheduled int64) (*Task, error
 }
 
 func (conv *Conveyor) add(taskId string, task []byte) error {
-	conv.cond.L.Lock()
-	defer conv.cond.L.Unlock()
-
 	// Key format: [conv id] \x00 [key type] \x00 [timestamp] \x00 [task id]
 	key := append(conv.queueKeyStart,
 		[]byte(fmt.Sprintf("%d%s%s", time.Now().Unix(), startPoint, taskId))...)
@@ -387,7 +370,9 @@ func (conv *Conveyor) add(taskId string, task []byte) error {
 	}
 
 	// Signal new task to queue reader.
+	conv.cond.L.Lock()
 	conv.cond.Signal()
+	conv.cond.L.Unlock()
 	conv.Stats.InQueue.Add(1)
 	return nil
 }
@@ -397,7 +382,7 @@ func (conv *Conveyor) Tasks() ([]*Task, error) {
 	limit := 100
 	res := make([]*Task, 0, limit)
 
-	iter := db.NewIterator(nil)
+	iter := db.NewIterator(nil, nil)
 	defer iter.Release()
 	for iter.Seek(conv.queueKeyStart); iter.Valid(); iter.Next() {
 		k := iter.Key()
@@ -420,6 +405,5 @@ func (conv *Conveyor) Tasks() ([]*Task, error) {
 			break
 		}
 	}
-
 	return res, nil
 }
