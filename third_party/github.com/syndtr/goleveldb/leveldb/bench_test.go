@@ -84,18 +84,19 @@ func openDBBench(b *testing.B, noCompress bool) *dbBench {
 		}
 	}
 
-	p := &dbBench{b: b}
+	p := &dbBench{
+		b:  b,
+		o:  &opt.Options{},
+		ro: &opt.ReadOptions{},
+		wo: &opt.WriteOptions{},
+	}
 	p.stor, err = storage.OpenFile(benchDB)
 	if err != nil {
 		b.Fatal("cannot open stor: ", err)
 	}
-
-	p.o = &opt.Options{}
 	if noCompress {
 		p.o.Compression = opt.NoCompression
 	}
-	p.ro = nil
-	p.wo = nil
 
 	p.db, err = Open(p.stor, p.o)
 	if err != nil {
@@ -239,7 +240,7 @@ func (p *dbBench) seeks() {
 }
 
 func (p *dbBench) newIter() iterator.Iterator {
-	iter := p.db.NewIterator(p.ro)
+	iter := p.db.NewIterator(nil, p.ro)
 	err := iter.Error()
 	if err != nil {
 		p.b.Fatal("cannot create iterator: ", err)

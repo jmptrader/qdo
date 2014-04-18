@@ -20,32 +20,45 @@ var (
 	errInvalidIkey = errors.New("leveldb: Iterator: invalid internal key")
 )
 
-func (db *DB) newRawIterator(ro *opt.ReadOptions) iterator.Iterator {
+func (db *DB) newRawIterator(slice *util.Range, ro *opt.ReadOptions) iterator.Iterator {
 	s := db.s
 
-	mem, frozenMem := db.getMem()
+	em, fm := db.getMems()
 	v := s.version()
 
-	tableIters := v.getIterators(ro)
-	iters := make([]iterator.Iterator, 0, len(tableIters)+2)
-	iters = append(iters, mem.NewIterator())
-	if frozenMem != nil {
-		iters = append(iters, frozenMem.NewIterator())
+	ti := v.getIterators(slice, ro)
+	n := len(ti) + 2
+	i := make([]iterator.Iterator, 0, n)
+	i = append(i, em.NewIterator(slice))
+	if fm != nil {
+		i = append(i, fm.NewIterator(slice))
 	}
-	iters = append(iters, tableIters...)
+	i = append(i, ti...)
 	strict := s.o.GetStrict(opt.StrictIterator) || ro.GetStrict(opt.StrictIterator)
-	mi := iterator.NewMergedIterator(iters, s.cmp, strict)
+	mi := iterator.NewMergedIterator(i, s.cmp, strict)
 	mi.SetReleaser(&versionReleaser{v: v})
 	return mi
 }
 
-func (db *DB) newIterator(seq uint64, ro *opt.ReadOptions) *dbIter {
-	rawIter := db.newRawIterator(ro)
+func (db *DB) newIterator(seq uint64, slice *util.Range, ro *opt.ReadOptions) *dbIter {
+	var slice_ *util.Range
+	if slice != nil {
+		slice_ = &util.Range{}
+		if slice.Start != nil {
+			slice_.Start = newIKey(slice.Start, kMaxSeq, tSeek)
+		}
+		if slice.Limit != nil {
+			slice_.Limit = newIKey(slice.Limit, kMaxSeq, tSeek)
+		}
+	}
+	rawIter := db.newRawIterator(slice_, ro)
 	iter := &dbIter{
 		cmp:    db.s.cmp.cmp,
 		iter:   rawIter,
 		seq:    seq,
 		strict: db.s.o.GetStrict(opt.StrictIterator) || ro.GetStrict(opt.StrictIterator),
+		key:    make([]byte, 0),
+		value:  make([]byte, 0),
 	}
 	runtime.SetFinalizer(iter, (*dbIter).Release)
 	return iter
@@ -149,6 +162,7 @@ func (i *dbIter) next() bool {
 			if seq <= i.seq {
 				switch t {
 				case tDel:
+					// Skip deleted key.
 					i.key = append(i.key[:0], ukey...)
 					i.dir = dirForward
 				case tVal:
@@ -162,15 +176,14 @@ func (i *dbIter) next() bool {
 			}
 		} else if i.strict {
 			i.setErr(errInvalidIkey)
-			return false
+			break
 		}
 		if !i.iter.Next() {
 			i.dir = dirEOI
 			i.iterErr()
-			return false
+			break
 		}
 	}
-	// Not reached.
 	return false
 }
 
@@ -193,25 +206,27 @@ func (i *dbIter) Next() bool {
 func (i *dbIter) prev() bool {
 	i.dir = dirBackward
 	del := true
-	for {
-		ukey, seq, t, ok := parseIkey(i.iter.Key())
-		if ok {
-			if seq <= i.seq {
-				if !del && i.cmp.Compare(ukey, i.key) < 0 {
-					return true
+	if i.iter.Valid() {
+		for {
+			ukey, seq, t, ok := parseIkey(i.iter.Key())
+			if ok {
+				if seq <= i.seq {
+					if !del && i.cmp.Compare(ukey, i.key) < 0 {
+						return true
+					}
+					del = (t == tDel)
+					if !del {
+						i.key = append(i.key[:0], ukey...)
+						i.value = append(i.value[:0], i.iter.Value()...)
+					}
 				}
-				del = (t == tDel)
-				if !del {
-					i.key = append(i.key[:0], ukey...)
-					i.value = append(i.value[:0], i.iter.Value()...)
-				}
+			} else if i.strict {
+				i.setErr(errInvalidIkey)
+				return false
 			}
-		} else if i.strict {
-			i.setErr(errInvalidIkey)
-			return false
-		}
-		if !i.iter.Prev() {
-			break
+			if !i.iter.Prev() {
+				break
+			}
 		}
 	}
 	if del {
@@ -245,6 +260,7 @@ func (i *dbIter) Prev() bool {
 				return false
 			}
 		}
+		i.dir = dirSOI
 		i.iterErr()
 		return false
 	}
@@ -271,6 +287,10 @@ func (i *dbIter) Release() {
 	if i.dir != dirReleased {
 		// Clear the finalizer.
 		runtime.SetFinalizer(i, nil)
+
+		if i.releaser != nil {
+			i.releaser.Release()
+		}
 
 		i.dir = dirReleased
 		i.key = nil

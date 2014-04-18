@@ -10,22 +10,14 @@ import (
 	"github.com/borgenk/qdo/third_party/github.com/syndtr/goleveldb/leveldb/iterator"
 	"github.com/borgenk/qdo/third_party/github.com/syndtr/goleveldb/leveldb/opt"
 	"github.com/borgenk/qdo/third_party/github.com/syndtr/goleveldb/leveldb/storage"
+	"github.com/borgenk/qdo/third_party/github.com/syndtr/goleveldb/leveldb/util"
 )
 
 // Reader is the interface that wraps basic Get and NewIterator methods.
 // This interface implemented by both DB and Snapshot.
 type Reader interface {
 	Get(key []byte, ro *opt.ReadOptions) (value []byte, err error)
-	NewIterator(ro *opt.ReadOptions) iterator.Iterator
-}
-
-// Range is a key range.
-type Range struct {
-	// Start of the key range, include in the range.
-	Start []byte
-
-	// Limit of the key range, not include in the range.
-	Limit []byte
+	NewIterator(slice *util.Range, ro *opt.ReadOptions) iterator.Iterator
 }
 
 type Sizes []uint64

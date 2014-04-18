@@ -138,7 +138,8 @@ type Options struct {
 	ErrorIfExist bool
 
 	// ErrorIfMissing defines whether an error should returned if the DB is
-	// missing.
+	// missing. If false then the database will be created if missing, otherwise
+	// an error will be returned.
 	//
 	// The default value is false.
 	ErrorIfMissing bool
@@ -159,7 +160,8 @@ type Options struct {
 	Filter filter.Filter
 
 	// MaxOpenFiles defines maximum number of open files to kept around
-	// (cached).
+	// (cached). This is not an hard limit, actual open files may exceed
+	// the defined value.
 	//
 	// The default value is 1000.
 	MaxOpenFiles int
