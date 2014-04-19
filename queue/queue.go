@@ -222,8 +222,8 @@ func (conv *Conveyor) Start() error {
 
 func (conv *Conveyor) process(task *Task) {
 	defer func() {
-		conv.processWaitGroup.Done()
 		<-conv.notifyReady
+		conv.processWaitGroup.Done()
 	}()
 
 	startTime := time.Now()

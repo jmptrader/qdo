@@ -3,6 +3,7 @@ package queue_test
 import (
 	"encoding/json"
 	"net/http"
+	"os"
 	"testing"
 	"time"
 
@@ -16,13 +17,18 @@ type TestPayload struct {
 	Value string
 }
 
-func testSetup() error {
+func testSetup() (*queue.Manager, error) {
 	resultPortal = make(chan string)
 	log.InitLog(log.New())
 
-	go queue.StartManager("/tmp/qdotest")
-	time.Sleep(time.Millisecond * 25)
-
+	err := os.RemoveAll("/tmp/qdotest")
+	if err != nil {
+		return nil, err
+	}
+	manager, err := queue.StartManager("/tmp/qdotest")
+	if err != nil {
+		return nil, err
+	}
 	c := &queue.Config{
 		MaxConcurrent: 5,
 		MaxRate:       100,
@@ -30,11 +36,13 @@ func testSetup() error {
 		TaskMaxTries:  1,
 	}
 	queue.AddConveyor("test", c)
+	time.Sleep(1 * time.Second)
 
-	http.HandleFunc("/", handler)
-	go http.ListenAndServe(":9999", nil)
+	/*
+		http.HandleFunc("/", handler)
+		go http.ListenAndServe(":9999", nil)*/
 
-	return nil
+	return manager, nil
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
@@ -49,7 +57,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 }
 
 func TestConveyorTaskProcess(t *testing.T) {
-	err := testSetup()
+	_, err := testSetup()
 	if err != nil {
 		t.Error(err)
 	}
@@ -70,4 +78,38 @@ func TestConveyorTaskProcess(t *testing.T) {
 	if result != "12345" {
 		t.Errorf("Expected result %s, got %s", "12345", result)
 	}
+}
+
+// $ go test -c
+// $ ./queue.test -test.run=20 -test.bench=BenchmarkConveyorProcessTask -test.benchtime=15s -test.cpuprofile=queue.prof
+// $ go tool pprof queue.test queue.prof
+// $ go tool pprof queue.test queue.prof --gif > queue.gif
+// (pprof) web
+func BenchmarkConveyorProcessTask(b *testing.B) {
+	b.StopTimer()
+	manager, err := testSetup()
+	if err != nil {
+		b.Error(err)
+	}
+	payload := TestPayload{Value: "12345"}
+	p, err := json.Marshal(payload)
+	if err != nil {
+		b.Error(err)
+	}
+	conveyor, err := queue.GetConveyor("test")
+	if err != nil {
+		b.Error(err)
+	}
+	if conveyor == nil {
+		b.Error(err)
+	}
+
+	b.StartTimer()
+
+	for i := 0; i < b.N; i++ {
+		conveyor.Add("http://localhost:9999", string(p), 0)
+	}
+
+	b.StopTimer()
+	manager.Stop()
 }
