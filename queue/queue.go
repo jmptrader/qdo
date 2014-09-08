@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"crypto/sha1"
 	"fmt"
+	"io"
+	"io/ioutil"
 	"net"
 	"net/http"
 	"net/url"
@@ -252,6 +254,7 @@ func (conv *Conveyor) process(task *Task) {
 	resp, err := client.Post(task.Target, "application/json",
 		bytes.NewReader([]byte(task.Payload)))
 	if err == nil {
+		io.Copy(ioutil.Discard, resp.Body)
 		resp.Body.Close()
 	}
 
