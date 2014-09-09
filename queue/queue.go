@@ -165,6 +165,18 @@ func (conv *Conveyor) Start() error {
 		return err
 	}
 
+	// Setup http client "globally" for a given conveyor.
+	transport := http.Transport{
+		Dial: func(network, addr string) (net.Conn, error) {
+			return net.DialTimeout(network, addr, time.Duration(conv.Config.TaskTimeout)*time.Second)
+		},
+		Proxy: http.ProxyFromEnvironment,
+		ResponseHeaderTimeout: time.Duration(conv.Config.TaskTimeout) * time.Second,
+	}
+	client := http.Client{
+		Transport: &transport,
+	}
+
 	defer conv.waitGroup.Done()
 
 	// Start scheduler for delayed or rescheduled tasks.
@@ -204,7 +216,7 @@ func (conv *Conveyor) Start() error {
 			// Block until conveyor is ready to process next task.
 			conv.notifyReady <- 1
 
-			go conv.process(t)
+			go conv.process(&client, t)
 			conv.processWaitGroup.Add(1)
 
 			// Throttle task invocations per second.
@@ -222,7 +234,7 @@ func (conv *Conveyor) Start() error {
 	return nil
 }
 
-func (conv *Conveyor) process(task *Task) {
+func (conv *Conveyor) process(client *http.Client, task *Task) {
 	defer func() {
 		<-conv.notifyReady
 		conv.processWaitGroup.Done()
@@ -241,16 +253,6 @@ func (conv *Conveyor) process(task *Task) {
 	log.Infof("conveyor %s task %s processing with target: %s tries: %d",
 		conv.ID, task.ID, task.Target, task.Tries)
 
-	transport := http.Transport{
-		Dial: func(network, addr string) (net.Conn, error) {
-			return net.DialTimeout(network, addr, time.Duration(conv.Config.TaskTimeout)*time.Second)
-		},
-		Proxy: http.ProxyFromEnvironment,
-		ResponseHeaderTimeout: time.Duration(conv.Config.TaskTimeout) * time.Second,
-	}
-	client := http.Client{
-		Transport: &transport,
-	}
 	resp, err := client.Post(task.Target, "application/json",
 		bytes.NewReader([]byte(task.Payload)))
 	if err == nil {
