@@ -6,6 +6,7 @@ import (
 	"html/template"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/borgenk/qdo/third_party/github.com/gorilla/mux"
 
@@ -71,6 +72,10 @@ func Run(port int, documentRoot string) {
 	r.PathPrefix("/static/").Handler(
 		http.StripPrefix("/static/", FileServer(http.Dir(documentRoot+"static/"))))
 
-	http.Handle("/", r)
-	http.ListenAndServe(fmt.Sprintf(":%d", port), nil)
+	srv := &http.Server{
+		Addr:        fmt.Sprintf(":%d", port),
+		Handler:     r,
+		ReadTimeout: 20 * time.Second,
+	}
+	srv.ListenAndServe()
 }
