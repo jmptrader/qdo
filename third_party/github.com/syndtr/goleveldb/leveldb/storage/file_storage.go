@@ -313,8 +313,7 @@ func (fs *fileStorage) SetManifest(f File) (err error) {
 	if err != nil {
 		return err
 	}
-	err = rename(path, filepath.Join(fs.path, "CURRENT"))
-	return
+	return rename(path, filepath.Join(fs.path, "CURRENT"))
 }
 
 func (fs *fileStorage) Close() error {
@@ -342,6 +341,20 @@ func (fs *fileStorage) Close() error {
 type fileWrap struct {
 	*os.File
 	f *file
+}
+
+func (fw fileWrap) Sync() error {
+	if err := fw.File.Sync(); err != nil {
+		return err
+	}
+	if fw.f.Type() == TypeManifest {
+		// Also sync parent directory if file type is manifest.
+		// See: https://code.google.com/p/leveldb/issues/detail?id=190.
+		if err := syncDir(fw.f.fs.path); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (fw fileWrap) Close() error {
@@ -410,6 +423,22 @@ func (f *file) Create() (Writer, error) {
 	return fileWrap{of, f}, nil
 }
 
+func (f *file) Replace(newfile File) error {
+	f.fs.mu.Lock()
+	defer f.fs.mu.Unlock()
+	if f.fs.open < 0 {
+		return ErrClosed
+	}
+	newfile2, ok := newfile.(*file)
+	if !ok {
+		return ErrInvalidFile
+	}
+	if f.open || newfile2.open {
+		return errFileOpen
+	}
+	return rename(newfile2.path(), f.path())
+}
+
 func (f *file) Type() FileType {
 	return f.t
 }
@@ -465,6 +494,8 @@ func (f *file) name() string {
 		return fmt.Sprintf("%06d.log", f.num)
 	case TypeTable:
 		return fmt.Sprintf("%06d.ldb", f.num)
+	case TypeTemp:
+		return fmt.Sprintf("%06d.tmp", f.num)
 	default:
 		panic("invalid file type")
 	}
@@ -484,6 +515,8 @@ func (f *file) parse(name string) bool {
 			f.t = TypeJournal
 		case "ldb", "sst":
 			f.t = TypeTable
+		case "tmp":
+			f.t = TypeTemp
 		default:
 			return false
 		}

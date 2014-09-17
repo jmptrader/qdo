@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"math/rand"
 	"testing"
 
 	"github.com/borgenk/qdo/third_party/github.com/syndtr/goleveldb/leveldb/cache"
@@ -23,13 +24,17 @@ type dbCorruptHarness struct {
 	dbHarness
 }
 
-func newDbCorruptHarness(t *testing.T) *dbCorruptHarness {
+func newDbCorruptHarnessWopt(t *testing.T, o *opt.Options) *dbCorruptHarness {
 	h := new(dbCorruptHarness)
-	h.init(t, &opt.Options{
+	h.init(t, o)
+	return h
+}
+
+func newDbCorruptHarness(t *testing.T) *dbCorruptHarness {
+	return newDbCorruptHarnessWopt(t, &opt.Options{
 		BlockCache: cache.NewLRUCache(100),
 		Strict:     opt.StrictJournalChecksum,
 	})
-	return h
 }
 
 func (h *dbCorruptHarness) recover() {
@@ -52,6 +57,38 @@ func (h *dbCorruptHarness) build(n int) {
 	for i := 0; i < n; i++ {
 		batch.Reset()
 		batch.Put(tkey(i), tval(i, ctValSize))
+		err := db.Write(batch, p.wo)
+		if err != nil {
+			t.Fatal("write error: ", err)
+		}
+	}
+}
+
+func (h *dbCorruptHarness) buildShuffled(n int, rnd *rand.Rand) {
+	p := &h.dbHarness
+	t := p.t
+	db := p.db
+
+	batch := new(Batch)
+	for i := range rnd.Perm(n) {
+		batch.Reset()
+		batch.Put(tkey(i), tval(i, ctValSize))
+		err := db.Write(batch, p.wo)
+		if err != nil {
+			t.Fatal("write error: ", err)
+		}
+	}
+}
+
+func (h *dbCorruptHarness) deleteRand(n, max int, rnd *rand.Rand) {
+	p := &h.dbHarness
+	t := p.t
+	db := p.db
+
+	batch := new(Batch)
+	for i := 0; i < n; i++ {
+		batch.Reset()
+		batch.Delete(tkey(rnd.Intn(max)))
 		err := db.Write(batch, p.wo)
 		if err != nil {
 			t.Fatal("write error: ", err)
@@ -139,6 +176,18 @@ func (h *dbCorruptHarness) removeAll(ft storage.FileType) {
 	}
 }
 
+func (h *dbCorruptHarness) removeOne(ft storage.FileType) {
+	ff, err := h.stor.GetFiles(ft)
+	if err != nil {
+		h.t.Fatal("get files: ", err)
+	}
+	f := ff[rand.Intn(len(ff))]
+	h.t.Logf("removing file @%d", f.Num())
+	if err := f.Remove(); err != nil {
+		h.t.Error("remove file: ", err)
+	}
+}
+
 func (h *dbCorruptHarness) check(min, max int) {
 	p := &h.dbHarness
 	t := p.t
@@ -216,15 +265,24 @@ func TestCorruptDB_TableIndex(t *testing.T) {
 }
 
 func TestCorruptDB_MissingManifest(t *testing.T) {
-	h := newDbCorruptHarness(t)
+	rnd := rand.New(rand.NewSource(0x0badda7a))
+	h := newDbCorruptHarnessWopt(t, &opt.Options{
+		BlockCache:  cache.NewLRUCache(100),
+		Strict:      opt.StrictJournalChecksum,
+		WriteBuffer: 1000 * 60,
+	})
 
 	h.build(1000)
 	h.compactMem()
-	h.build(1000)
+	h.buildShuffled(1000, rnd)
 	h.compactMem()
-	h.build(1000)
+	h.deleteRand(500, 1000, rnd)
 	h.compactMem()
-	h.build(1000)
+	h.buildShuffled(1000, rnd)
+	h.compactMem()
+	h.deleteRand(500, 1000, rnd)
+	h.compactMem()
+	h.buildShuffled(1000, rnd)
 	h.compactMem()
 	h.closeDB()
 
@@ -237,6 +295,7 @@ func TestCorruptDB_MissingManifest(t *testing.T) {
 	h.check(1000, 1000)
 	h.build(1000)
 	h.compactMem()
+	h.compactRange("", "")
 	h.closeDB()
 
 	h.recover()
@@ -335,6 +394,79 @@ func TestCorruptDB_UnrelatedKeys(t *testing.T) {
 	h.getVal(string(tkey(1000)), string(tval(1000, ctValSize)))
 	h.compactMem()
 	h.getVal(string(tkey(1000)), string(tval(1000, ctValSize)))
+
+	h.close()
+}
+
+func TestCorruptDB_Level0NewerFileHasOlderSeqnum(t *testing.T) {
+	h := newDbCorruptHarness(t)
+
+	h.put("a", "v1")
+	h.put("b", "v1")
+	h.compactMem()
+	h.put("a", "v2")
+	h.put("b", "v2")
+	h.compactMem()
+	h.put("a", "v3")
+	h.put("b", "v3")
+	h.compactMem()
+	h.put("c", "v0")
+	h.put("d", "v0")
+	h.compactMem()
+	h.compactRangeAt(1, "", "")
+	h.closeDB()
+
+	h.recover()
+	h.getVal("a", "v3")
+	h.getVal("b", "v3")
+	h.getVal("c", "v0")
+	h.getVal("d", "v0")
+
+	h.close()
+}
+
+func TestCorruptDB_RecoverInvalidSeq_Issue53(t *testing.T) {
+	h := newDbCorruptHarness(t)
+
+	h.put("a", "v1")
+	h.put("b", "v1")
+	h.compactMem()
+	h.put("a", "v2")
+	h.put("b", "v2")
+	h.compactMem()
+	h.put("a", "v3")
+	h.put("b", "v3")
+	h.compactMem()
+	h.put("c", "v0")
+	h.put("d", "v0")
+	h.compactMem()
+	h.compactRangeAt(0, "", "")
+	h.closeDB()
+
+	h.recover()
+	h.getVal("a", "v3")
+	h.getVal("b", "v3")
+	h.getVal("c", "v0")
+	h.getVal("d", "v0")
+
+	h.close()
+}
+
+func TestCorruptDB_MissingTableFiles(t *testing.T) {
+	h := newDbCorruptHarness(t)
+
+	h.put("a", "v1")
+	h.put("b", "v1")
+	h.compactMem()
+	h.put("c", "v2")
+	h.put("d", "v2")
+	h.compactMem()
+	h.put("e", "v3")
+	h.put("f", "v3")
+	h.closeDB()
+
+	h.removeOne(storage.TypeTable)
+	h.openAssert(false)
 
 	h.close()
 }

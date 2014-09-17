@@ -14,9 +14,9 @@ if [ ! -f "qdo" ]; then
 fi
 
 # Copy binary.
-if [ -f "/etc/init/qdo.conf" ]; then
-    service qdo stop
-fi
+#if [ -f "/etc/init/qdo.conf" ]; then
+#    service qdo stop
+#fi
 cp qdo /usr/bin/qdo
 
 # Setup templates and static files.

@@ -11,77 +11,96 @@ import (
 
 	"github.com/borgenk/qdo/third_party/github.com/syndtr/goleveldb/leveldb/memdb"
 	"github.com/borgenk/qdo/third_party/github.com/syndtr/goleveldb/leveldb/opt"
+	"github.com/borgenk/qdo/third_party/github.com/syndtr/goleveldb/leveldb/util"
 )
 
-func (d *DB) doWriteJournal(b *Batch) error {
-	w, err := d.journal.Next()
+func (db *DB) writeJournal(b *Batch) error {
+	w, err := db.journal.Next()
 	if err != nil {
 		return err
 	}
 	if _, err := w.Write(b.encode()); err != nil {
 		return err
 	}
-	if err := d.journal.Flush(); err != nil {
+	if err := db.journal.Flush(); err != nil {
 		return err
 	}
 	if b.sync {
-		return d.journalWriter.Sync()
+		return db.journalWriter.Sync()
 	}
 	return nil
 }
 
-func (d *DB) writeJournal() {
-	defer d.closeWg.Done()
+func (db *DB) jWriter() {
+	defer db.closeW.Done()
 	for {
 		select {
-		case _, _ = <-d.closeCh:
-			return
-		case b := <-d.journalCh:
+		case b := <-db.journalC:
 			if b != nil {
-				d.journalAckCh <- d.doWriteJournal(b)
+				db.journalAckC <- db.writeJournal(b)
 			}
+		case _, _ = <-db.closeC:
+			return
 		}
 	}
 }
 
-func (d *DB) flush() (mem *memdb.DB, err error) {
-	s := d.s
+func (db *DB) rotateMem(n int) (mem *memDB, err error) {
+	// Wait for pending memdb compaction.
+	err = db.compSendIdle(db.mcompCmdC)
+	if err != nil {
+		return
+	}
 
+	// Create new memdb and journal.
+	mem, err = db.newMem(n)
+	if err != nil {
+		return
+	}
+
+	// Schedule memdb compaction.
+	db.compTrigger(db.mcompTriggerC)
+	return
+}
+
+func (db *DB) flush(n int) (mem *memDB, nn int, err error) {
 	delayed := false
-	flush := func() bool {
-		v := s.version()
+	flush := func() (retry bool) {
+		v := db.s.version()
 		defer v.release()
-		mem = d.getEffectiveMem()
+		mem = db.getEffectiveMem()
+		defer func() {
+			if retry {
+				mem.decref()
+				mem = nil
+			}
+		}()
+		nn = mem.mdb.Free()
 		switch {
 		case v.tLen(0) >= kL0_SlowdownWritesTrigger && !delayed:
 			delayed = true
 			time.Sleep(time.Millisecond)
-		case mem.Size() < s.o.GetWriteBuffer():
+		case nn >= n:
 			return false
 		case v.tLen(0) >= kL0_StopWritesTrigger:
 			delayed = true
-			err = d.wakeCompaction(2)
+			err = db.compSendIdle(db.tcompCmdC)
 			if err != nil {
 				return false
 			}
 		default:
-			// Wait for pending memdb compaction.
-			select {
-			case _, _ = <-d.closeCh:
-				err = ErrClosed
-				return false
-			case <-d.compMemAckCh:
-			case err = <-d.compErrCh:
-				return false
+			// Allow memdb to grow if it has no entry.
+			if mem.mdb.Len() == 0 {
+				nn = n
+			} else {
+				mem.decref()
+				mem, err = db.rotateMem(n)
+				if err == nil {
+					nn = mem.mdb.Free()
+				} else {
+					nn = 0
+				}
 			}
-			// Create new memdb and journal.
-			mem, err = d.newMem()
-			if err != nil {
-				return false
-			}
-
-			// Schedule memdb compaction.
-			d.compMemCh <- nil
 			return false
 		}
 		return true
@@ -90,7 +109,7 @@ func (d *DB) flush() (mem *memdb.DB, err error) {
 	for flush() {
 	}
 	if delayed {
-		s.logf("db@write delayed T·%v", time.Since(start))
+		db.logf("db@write delayed T·%v", time.Since(start))
 	}
 	return
 }
@@ -99,8 +118,8 @@ func (d *DB) flush() (mem *memdb.DB, err error) {
 // sequentially.
 //
 // It is safe to modify the contents of the arguments after Write returns.
-func (d *DB) Write(b *Batch, wo *opt.WriteOptions) (err error) {
-	err = d.ok()
+func (db *DB) Write(b *Batch, wo *opt.WriteOptions) (err error) {
+	err = db.ok()
 	if err != nil || b == nil || b.len() == 0 {
 		return
 	}
@@ -108,81 +127,97 @@ func (d *DB) Write(b *Batch, wo *opt.WriteOptions) (err error) {
 	b.init(wo.GetSync())
 
 	// The write happen synchronously.
+retry:
 	select {
-	case _, _ = <-d.closeCh:
+	case db.writeC <- b:
+		if <-db.writeMergedC {
+			return <-db.writeAckC
+		}
+		goto retry
+	case db.writeLockC <- struct{}{}:
+	case _, _ = <-db.closeC:
 		return ErrClosed
-	case d.writeCh <- b:
-		return <-d.writeAckCh
-	case d.writeLockCh <- struct{}{}:
 	}
 
 	merged := 0
 	defer func() {
-		<-d.writeLockCh
+		<-db.writeLockC
 		for i := 0; i < merged; i++ {
-			d.writeAckCh <- err
+			db.writeAckC <- err
 		}
 	}()
 
-	mem, err := d.flush()
+	mem, memFree, err := db.flush(b.size())
 	if err != nil {
 		return
 	}
+	defer mem.decref()
 
 	// Calculate maximum size of the batch.
 	m := 1 << 20
 	if x := b.size(); x <= 128<<10 {
 		m = x + (128 << 10)
 	}
+	m = minInt(m, memFree)
 
 	// Merge with other batch.
 drain:
-	for b.size() <= m && !b.sync {
+	for b.size() < m && !b.sync {
 		select {
-		case nb := <-d.writeCh:
-			b.append(nb)
-			merged++
+		case nb := <-db.writeC:
+			if b.size()+nb.size() <= m {
+				b.append(nb)
+				db.writeMergedC <- true
+				merged++
+			} else {
+				db.writeMergedC <- false
+				break drain
+			}
 		default:
 			break drain
 		}
 	}
 
 	// Set batch first seq number relative from last seq.
-	b.seq = d.seq + 1
+	b.seq = db.seq + 1
 
 	// Write journal concurrently if it is large enough.
 	if b.size() >= (128 << 10) {
 		// Push the write batch to the journal writer
 		select {
-		case _, _ = <-d.closeCh:
+		case _, _ = <-db.closeC:
 			err = ErrClosed
 			return
-		case d.journalCh <- b:
+		case db.journalC <- b:
 			// Write into memdb
-			b.memReplay(mem)
+			b.memReplay(mem.mdb)
 		}
 		// Wait for journal writer
 		select {
-		case _, _ = <-d.closeCh:
+		case _, _ = <-db.closeC:
 			err = ErrClosed
 			return
-		case err = <-d.journalAckCh:
+		case err = <-db.journalAckC:
 			if err != nil {
 				// Revert memdb if error detected
-				b.revertMemReplay(mem)
+				b.revertMemReplay(mem.mdb)
 				return
 			}
 		}
 	} else {
-		err = d.doWriteJournal(b)
+		err = db.writeJournal(b)
 		if err != nil {
 			return
 		}
-		b.memReplay(mem)
+		b.memReplay(mem.mdb)
 	}
 
 	// Set last seq number.
-	d.addSeq(uint64(b.len()))
+	db.addSeq(uint64(b.len()))
+
+	if b.size() >= memFree {
+		db.rotateMem(0)
+	}
 	return
 }
 
@@ -190,18 +225,66 @@ drain:
 // for that key; a DB is not a multi-map.
 //
 // It is safe to modify the contents of the arguments after Put returns.
-func (d *DB) Put(key, value []byte, wo *opt.WriteOptions) error {
+func (db *DB) Put(key, value []byte, wo *opt.WriteOptions) error {
 	b := new(Batch)
 	b.Put(key, value)
-	return d.Write(b, wo)
+	return db.Write(b, wo)
 }
 
 // Delete deletes the value for the given key. It returns ErrNotFound if
 // the DB does not contain the key.
 //
 // It is safe to modify the contents of the arguments after Delete returns.
-func (d *DB) Delete(key []byte, wo *opt.WriteOptions) error {
+func (db *DB) Delete(key []byte, wo *opt.WriteOptions) error {
 	b := new(Batch)
 	b.Delete(key)
-	return d.Write(b, wo)
+	return db.Write(b, wo)
+}
+
+func isMemOverlaps(icmp *iComparer, mem *memdb.DB, min, max []byte) bool {
+	iter := mem.NewIterator(nil)
+	defer iter.Release()
+	return (max == nil || (iter.First() && icmp.uCompare(max, iKey(iter.Key()).ukey()) >= 0)) &&
+		(min == nil || (iter.Last() && icmp.uCompare(min, iKey(iter.Key()).ukey()) <= 0))
+}
+
+// CompactRange compacts the underlying DB for the given key range.
+// In particular, deleted and overwritten versions are discarded,
+// and the data is rearranged to reduce the cost of operations
+// needed to access the data. This operation should typically only
+// be invoked by users who understand the underlying implementation.
+//
+// A nil Range.Start is treated as a key before all keys in the DB.
+// And a nil Range.Limit is treated as a key after all keys in the DB.
+// Therefore if both is nil then it will compact entire DB.
+func (db *DB) CompactRange(r util.Range) error {
+	if err := db.ok(); err != nil {
+		return err
+	}
+
+	select {
+	case db.writeLockC <- struct{}{}:
+	case _, _ = <-db.closeC:
+		return ErrClosed
+	}
+
+	// Check for overlaps in memdb.
+	mem := db.getEffectiveMem()
+	defer mem.decref()
+	if isMemOverlaps(db.s.icmp, mem.mdb, r.Start, r.Limit) {
+		// Memdb compaction.
+		if _, err := db.rotateMem(0); err != nil {
+			<-db.writeLockC
+			return err
+		}
+		<-db.writeLockC
+		if err := db.compSendIdle(db.mcompCmdC); err != nil {
+			return err
+		}
+	} else {
+		<-db.writeLockC
+	}
+
+	// Table compaction.
+	return db.compSendRange(db.tcompCmdC, -1, r.Start, r.Limit)
 }

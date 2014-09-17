@@ -20,7 +20,7 @@ import (
 	"github.com/borgenk/qdo/third_party/github.com/syndtr/goleveldb/leveldb/util"
 )
 
-const typeShift = 3
+const typeShift = 4
 
 var (
 	tsErrInvalidFile = errors.New("leveldb.testStorage: invalid file for argument")
