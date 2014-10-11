@@ -1,0 +1,262 @@
+body {
+  margin: 0;
+  background-color: #FFFFFF;
+  font-family: "Helvetica Neue",Helvetica,Arial,sans-serif;
+}
+h1 {
+  font-size: 1.6rem;
+  margin: 0;
+  margin-bottom: 0.8rem;
+  font-weight: normal;
+}
+h2 {
+  font-size: 18px;
+  color: #999999;
+  margin: 0 0 10px 0;
+}
+ul {
+  list-style-type: none;
+  margin: 0;
+  padding: 0;
+}
+nav {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  background-color: #252827;
+  width: 48px;
+  padding: 18px;
+  color: #a7abb1;
+  overflow: hidden;
+}
+nav .top,
+nav .bottom {
+  position: absolute;
+  left: 0;
+  width: 48px;
+  padding: 18px;
+}
+nav .top {
+  top: 0;
+  height: 60px;
+}
+nav .bottom {
+  bottom: 0;
+  height: 40px;
+}
+nav .top a {
+  font-size: 24px;
+  font-weight: bold;
+  margin: 0;
+  text-align: center;
+  color: #000000;
+  text-decoration: none;
+  opacity: 0.4;
+  display: block;
+}
+.site-nav {
+  margin-top: 42px;
+  padding-left: 12px;
+  padding-right: 12px;
+}
+.site-nav a {
+  font-size: 26px;
+  color: #515151;
+  text-decoration: none;
+}
+.site-nav a.active {
+  color: #2C7586;
+}
+.site-nav a > span {
+  margin-right: 4px;
+}
+main {
+  margin-left: 84px;
+  overflow-y: auto;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background-color: #FFFFFF;
+}
+main .top {
+  margin-left: 18px;
+  height: 24px;
+  padding: 10px;
+  background-color: #FFFFFF;
+  display: none;
+}
+main .title a {
+  color: #D3D3D3;
+  text-decoration: none;
+}
+main .content {
+  padding: 18px 30px;
+}
+table {
+  width: 100%;
+  table-layout: fixed;
+}
+table th {
+  color: #636363;
+  font-weight: normal;
+}
+table th, table td {
+  text-align: left;
+  padding: 6px 6px 6px 0;
+}
+table tbody tr:nth-child(odd) {
+  background-color: #FCFCFC;
+}
+table a {
+  color: #000000;
+}
+dl {
+  margin: 5px 0 0 0;
+}
+dl dt {
+  display: block;
+  margin: 0;
+  float: left;
+  margin-right: 10px;
+  color: #999999;
+}
+dl dd {
+  margin: 0 0 0 22px;
+  overflow-x: hidden;
+  text-overflow: ellipsis;
+  text-align: right;
+}
+
+.dashboard .new {
+  overflow: hidden;
+  margin-bottom: 30px;
+}
+.dashboard .new a {
+  display: block;
+  float: left;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 2px;
+  color: #5CD2CD;
+  background-color: #2C7586;
+  text-decoration: none;
+}
+.dashboard a {
+  text-decoration: none;
+}
+.dashboard .status,
+.dashboard .processing,
+.dashboard .waiting,
+.dashboard .scheduled {
+  width: 10%;
+  min-width: 100px;
+}
+.dashboard .no-queues {
+  text-align: center;
+  margin-top: 200px;
+}
+.dashboard .no-queues i {
+  font-size: 40px;
+  color: #E5E5E5;
+}
+.dashboard .no-queues p {
+  color: #DBDBDB;
+  font-size: 22px;
+  margin-top: 14px;
+}
+
+.create-queue form {
+  margin-top: 20px;
+}
+.create-queue .input {
+  margin-bottom: 14px;
+}
+.create-queue .input input {
+  width: 160px;
+}
+.create-queue .input.id input {
+  width: 400px;
+}
+.create-queue label,
+.create-queue input {
+  display: block;
+}
+.create-queue label {
+  font-size: 0.9rem;
+  color: #6F6F6F;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.create-queue input {
+  margin-bottom: 4px;
+  border: 1px solid #DADADA;
+  padding: 4px 10px;
+}
+.create-queue p {
+  margin: 0;
+  color: #A8A8A8;
+  font-size: 0.8rem;
+}
+.create-queue .buttons {
+  margin-top: 40px;
+}
+.create-queue button {
+  border: none;
+  padding: 8px 26px;
+  border-radius: 2px;
+  color: #5CD2CD;
+  background-color: #2C7586;
+  text-decoration: none;
+  margin-right: 14px;
+}
+.create-queue button.cancel {
+  background-color: #F7F7F7;
+  color: #C8C8C8;
+}
+
+.view-queue .config,
+.view-queue .stats {
+  float: left;
+  height: 250px;
+  width: 50%
+}
+.view-queue dl {
+  padding-right: 40px;
+}
+.view-queue .section-header {
+  font-size: 0.9rem;
+}
+.view-queue .tabs {
+  border-bottom: 2px solid #ECECEC;
+  margin-bottom: 16px;
+}
+.view-queue .tabs a {
+  display: block;
+  position: relative;
+  float: left;
+  text-decoration: none;
+  color: #000;
+  margin-right: 26px;
+  text-transform: uppercase;
+  font-size: 0.9rem;
+  padding-bottom: 4px;
+}
+.view-queue .tabs a.active:after {
+  background: #5CD2CD;
+  bottom: -2px;
+  content: "";
+  display: block;
+  height: 2px;
+  left: 0;
+  position: absolute;
+  right: 0;
+}
+.view-queue .tabs .clear {
+  clear: both;
+}
+.view-queue table {
+  font-size: 0.9rem;
+}

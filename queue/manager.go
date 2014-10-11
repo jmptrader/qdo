@@ -1,127 +1,146 @@
 package queue
 
 import (
+	"bytes"
 	"errors"
-	"fmt"
 	"sync"
 
-	"github.com/borgenk/qdo/third_party/github.com/syndtr/goleveldb/leveldb"
-	"github.com/borgenk/qdo/third_party/github.com/syndtr/goleveldb/leveldb/comparer"
-
 	"github.com/borgenk/qdo/log"
+	"github.com/borgenk/qdo/store"
+)
+
+type systemSignal int
+
+const (
+	start  systemSignal = iota
+	pause  systemSignal = iota
+	resume systemSignal = iota
+	stop   systemSignal = iota
+)
+
+const (
+	prefix string = "\x00"
+	suffix string = "\xff"
+)
+
+const (
+	queueManagerKey string = "m"
 )
 
 type Manager struct {
-	Conveyors map[string]*Conveyor
-	waitGroup *sync.WaitGroup
+	queues map[string]*QueueManager
+	db     store.Store
+	wg     *sync.WaitGroup
+}
+
+type Config struct {
+	MaxConcurrent int32 `json:"max_concurrent"` // Number of simultaneous workers processing tasks.
+	MaxRate       int32 `json:"max_rate"`       // Number of maxium task invocations from queue per second.
+	TaskTimeout   int32 `json:"task_timeout"`   // Duration allowed per task to complete in seconds.
+	TaskMaxTries  int32 `json:"task_max_tries"` // Number of tries per task before giving up. Set 0 for unlimited retries.
 }
 
 var (
 	manager *Manager
-	db      *leveldb.DB
 	mu      sync.Mutex
 	err     error
 )
 
-// StartManager starts the conveyor state manager.
-func StartManager(dbFilepath string) (*Manager, error) {
+var (
+	ErrQueueNotFound     = errors.New("Queue not found")
+	ErrQueueAlreadyExist = errors.New("Queue already exist")
+)
+
+// StartManager starts the queue manager.
+func StartManager(db store.Store) (*Manager, error) {
 	manager = &Manager{
-		Conveyors: make(map[string]*Conveyor),
-		waitGroup: &sync.WaitGroup{},
+		queues: make(map[string]*QueueManager),
+		wg:     &sync.WaitGroup{},
+		db:     db,
 	}
-	err := manager.start(dbFilepath)
+	err := manager.start()
 	if err != nil {
 		return nil, err
 	}
 	return manager, nil
 }
 
-func (man *Manager) start(dbFilepath string) error {
-	db, err = leveldb.OpenFile(dbFilepath, nil)
+func (man *Manager) start() error {
+	storedQueues, err := getAllStoredQueues()
 	if err != nil {
-		log.Error(fmt.Sprintf("open database file %s failed", dbFilepath), err)
 		return err
 	}
-
-	storedConveyors, err := getAllStoredConveyors()
-	if err != nil {
-		log.Error("", err)
-		return err
-	}
-	for _, v := range storedConveyors {
-		man.Conveyors[v.ID] = v
-		go man.Conveyors[v.ID].Init(man.waitGroup).Start()
-		man.waitGroup.Add(1)
+	for _, v := range *storedQueues {
+		man.queues[v.ID] = &v
+		man.queues[v.ID].db = man.db
+		go man.queues[v.ID].Initialize(man.wg).Start()
+		man.wg.Add(1)
 	}
 	return nil
 }
 
+// Stop waits for all active queues to stop before cleaning up resources and
+// exiting.
 func (man *Manager) Stop() {
-	for _, conv := range manager.Conveyors {
-		conv.Stop()
+	for _, queue := range manager.queues {
+		go queue.Stop()
 	}
-	man.waitGroup.Wait()
-	db.Close()
+	man.wg.Wait()
+	man.db.Close()
 }
 
-func getAllStoredConveyors() ([]*Conveyor, error) {
-	res := make([]*Conveyor, 0, 1000)
-	iter := db.NewIterator(nil, nil)
-	defer iter.Release()
-	for iter.Seek([]byte("c\x00")); iter.Valid(); iter.Next() {
-		k := iter.Key()
-		v := iter.Value()
+// GetQueue returns a queue manager for a given id.
+func GetQueue(queueID string) (*QueueManager, error) {
+	mu.Lock()
+	defer mu.Unlock()
 
-		if comparer.DefaultComparer.Compare(k, []byte("c\xff")) > 0 {
-			break
-		}
-
-		c := &Conveyor{}
-		err := GobDecode(v, c)
-		if err != nil {
-			panic("for now")
-		}
-
-		res = append(res, c)
+	if manager == nil {
+		return nil, errors.New("Manager not initialized")
+	}
+	res, ok := manager.queues[queueID]
+	if !ok {
+		return nil, ErrQueueNotFound
 	}
 	return res, nil
 }
 
-// GetConveyor returns a container for a given id if it exist.
-func GetConveyor(conveyorID string) (*Conveyor, error) {
+// GetAllQueues returns all queue managers.
+func GetAllQueues() ([]*QueueManager, error) {
 	mu.Lock()
 	defer mu.Unlock()
 
 	if manager == nil {
 		return nil, errors.New("Manager not initialized")
 	}
-
-	conv, ok := manager.Conveyors[conveyorID]
-	if !ok {
-		return nil, errors.New("Conveyor not found")
-	}
-	return conv, nil
-}
-
-// GetALlConveyors returns all conveyors.
-func GetAllConveyors() ([]*Conveyor, error) {
-	mu.Lock()
-	defer mu.Unlock()
-
-	if manager == nil {
-		return nil, errors.New("Manager not initialized")
-	}
-
-	res := make([]*Conveyor, 0, len(manager.Conveyors))
-	for _, v := range manager.Conveyors {
+	res := make([]*QueueManager, 0, len(manager.queues))
+	for _, v := range manager.queues {
 		res = append(res, v)
 	}
 	return res, nil
 }
 
-// AddConveyor adds a new container with a given id and config setup.
-// Conveyor will automatically start.
-func AddConveyor(conveyorID string, config *Config) error {
+// getAllStoredQueues retrieves all stored queue managers.
+func getAllStoredQueues() (*[]QueueManager, error) {
+	res := []QueueManager{}
+	iter := manager.db.NewIterator(nil)
+	defer iter.Close()
+	for iter.Seek([]byte(queueManagerKey + prefix)); iter.Valid(); iter.Next() {
+		if bytes.Compare(iter.Key(), []byte(queueManagerKey+suffix)) > 0 {
+			break
+		}
+		c := QueueManager{}
+		err := GobDecode(iter.Value(), &c)
+		if err != nil {
+			panic("for now")
+		}
+		res = append(res, c)
+	}
+	return &res, nil
+}
+
+// AddQueue adds a new queue manager and starts it automatically. QueueID must
+// be unique.
+func AddQueue(queueID string, config *Config) error {
 	mu.Lock()
 	defer mu.Unlock()
 
@@ -129,30 +148,35 @@ func AddConveyor(conveyorID string, config *Config) error {
 		return errors.New("Manager not initialized")
 	}
 
-	conv := NewConveyor(conveyorID, config, manager.waitGroup)
-	manager.Conveyors[conveyorID] = conv
+	_, ok := manager.queues[queueID]
+	if ok {
+		return ErrQueueAlreadyExist
+	}
 
-	b, err := GobEncode(conv)
+	queue := NewQueue(queueID, config, manager.db, manager.wg)
+	manager.queues[queueID] = queue
+
+	b, err := GobEncode(queue)
 	if err != nil {
 		log.Error("", err)
 		return err
 	}
-	err = db.Put(conveyorKey(conveyorID), b, nil)
+	err = manager.db.Put(getQueueManagerKey(queueID), b)
 	if err != nil {
-		log.Error("creating new conveyor failed", err)
+		log.Error("creating new queue failed", err)
 		return err
 	}
 
 	go func() {
-		manager.Conveyors[conveyorID].Start()
+		manager.queues[queueID].Start()
 	}()
-	manager.waitGroup.Add(1)
+	manager.wg.Add(1)
 	return nil
 }
 
-// RemoveConveyor stops and removes the conveyor. The conveyor will wait on
+// RemoveQueue stops and removes the queue. The queue will wait on
 // running tasks to complete before shutting down.
-func RemoveConveyor(conveyorId string) error {
+func RemoveQueue(queueID string) error {
 	mu.Lock()
 	defer mu.Unlock()
 
@@ -160,25 +184,24 @@ func RemoveConveyor(conveyorId string) error {
 		return errors.New("Manager not initialized")
 	}
 
-	// Check if conveyor exist.
-	_, ok := manager.Conveyors[conveyorId]
+	// Check if queue exist.
+	_, ok := manager.queues[queueID]
 	if !ok {
-		return errors.New("Conveyor does not exist")
+		return errors.New("Queue does not exist")
 	}
-
-	err := db.Delete(conveyorKey(conveyorId), nil)
+	err := manager.db.Delete(getQueueManagerKey(queueID))
 	if err != nil {
 		return err
 	}
-
 	go func() {
-		manager.Conveyors[conveyorId].Stop()
-		delete(manager.Conveyors, conveyorId)
+		manager.queues[queueID].Stop()
+		delete(manager.queues, queueID)
 		// TODO: Clean up tasks.
 	}()
 	return nil
 }
 
-func conveyorKey(conveyorId string) []byte {
-	return []byte(fmt.Sprintf("c\x00%s", conveyorId))
+// getQueueManagerKey builds the queue manager key prefix.
+func getQueueManagerKey(queueID string) []byte {
+	return []byte(queueManagerKey + prefix + queueID)
 }

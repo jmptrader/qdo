@@ -1,51 +1,88 @@
 # -*- mode: ruby -*-
-# vi: set ft=ruby :
+# # vi: set ft=ruby :
 
-$script = <<SCRIPT
-  #!/usr/bin/env bash
-  set -e
+require 'fileutils'
 
-  # Exit if setup is already done (Vagrant 1.2.x backward compatibility).
-  if [ -e "/opt/vagrant-installed" ]; then
-      exit 0
-  fi
-  mkdir /opt/vagrant-installed
+CLOUD_CONFIG_PATH = "./user-data"
+CONFIG= "config.rb"
 
-  export DEBIAN_FRONTEND=noninteractive
+# Defaults for config options defined in CONFIG
+$num_instances = 1
+$enable_serial_logging = false
+$vb_gui = false
+$vb_memory = 2048
+$vb_cpus = 1
 
-  # Date
-  # https://help.ubuntu.com/community/UbuntuTime
-  TIMEZONE=$(head -n 1 "/etc/timezone")
-  echo "Europe/Oslo" | tee /etc/timezone
-  dpkg-reconfigure --frontend noninteractive tzdata
+# Attempt to apply the deprecated environment variable NUM_INSTANCES to
+# $num_instances while allowing config.rb to override it
+if ENV["NUM_INSTANCES"].to_i > 0 && ENV["NUM_INSTANCES"]
+  $num_instances = ENV["NUM_INSTANCES"].to_i
+end
 
-  apt-get update -q -y
-  apt-get install -q -y python-software-properties git curl
-
-  # Go development environment
-  add-apt-repository -y ppa:duh/golang
-  apt-get update -q -y
-  apt-get install -q -y golang
-
-  # ~/go ~/go/src ~/go/pkg ~/go/bin
-  mkdir /home/vagrant/go/pkg
-  mkdir /home/vagrant/go/bin
-  chown -R vagrant.vagrant /home/vagrant/go
-
-  echo "" >> /home/vagrant/.bashrc
-  echo "export GOPATH=~/go" >> /home/vagrant/.bashrc
-SCRIPT
+if File.exist?(CONFIG)
+	require_relative CONFIG
+end
 
 Vagrant.configure("2") do |config|
-  config.vm.box = "precise64"
-  config.vm.box_url = "http://files.vagrantup.com/precise64.box"
-  config.vm.network :forwarded_port, guest: 8080, host: 8080
-  config.vm.synced_folder ".", "/home/vagrant/go/src/github.com/borgenk/qdo", id: "vagrant-root", :owner => "vagrant", :group => "vagrant"
-  config.vm.provision :shell, :inline => $script
+  config.vm.box = "coreos-alpha"
+  config.vm.box_version = ">= 308.0.1"
+  config.vm.box_url = "http://storage.core-os.net/coreos/amd64-usr/alpha/coreos_production_vagrant.json"
 
-  config.vm.provider "virtualbox" do |vb|
-    vb.customize ["modifyvm", :id, "--memory", "512"]
-    vb.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
-    vb.customize ["modifyvm", :id, "--natdnsproxy1", "on"]
+  config.vm.provider :vmware_fusion do |vb, override|
+    override.vm.box_url = "http://storage.core-os.net/coreos/amd64-usr/alpha/coreos_production_vagrant_vmware_fusion.json"
+  end
+
+  # plugin conflict
+  if Vagrant.has_plugin?("vagrant-vbguest") then
+    config.vbguest.auto_update = false
+  end
+
+  (1..$num_instances).each do |i|
+    config.vm.define vm_name = "core-%02d" % i do |config|
+      config.vm.hostname = vm_name
+
+      if $enable_serial_logging
+        logdir = File.join(File.dirname(__FILE__), "log")
+        FileUtils.mkdir_p(logdir)
+
+        serialFile = File.join(logdir, "%s-serial.txt" % vm_name)
+        FileUtils.touch(serialFile)
+
+        config.vm.provider :vmware_fusion do |v, override|
+          v.vmx["serial0.present"] = "TRUE"
+          v.vmx["serial0.fileType"] = "file"
+          v.vmx["serial0.fileName"] = serialFile
+          v.vmx["serial0.tryNoRxLoss"] = "FALSE"
+        end
+
+        config.vm.provider :virtualbox do |vb, override|
+          vb.customize ["modifyvm", :id, "--uart1", "0x3F8", "4"]
+          vb.customize ["modifyvm", :id, "--uartmode1", serialFile]
+        end
+      end
+
+      if $expose_docker_tcp
+        config.vm.network "forwarded_port", guest: 4243, host: $expose_docker_tcp, auto_correct: true
+      end
+      config.vm.network :forwarded_port, guest: 8080, host: 8080
+      config.vm.network :forwarded_port, guest: 3306, host: 3306
+      config.vm.network :forwarded_port, guest: 7999, host: 7999
+
+      config.vm.provider :virtualbox do |vb|
+        vb.gui = $vb_gui
+        vb.memory = $vb_memory
+        vb.cpus = $vb_cpus
+      end
+
+      ip = "172.17.8.#{i+100}"
+      config.vm.network :private_network, ip: ip
+      config.vm.synced_folder ".", "/home/core/share", type: "rsync"
+
+      if File.exist?(CLOUD_CONFIG_PATH)
+        config.vm.provision :file, :source => "#{CLOUD_CONFIG_PATH}", :destination => "/tmp/vagrantfile-user-data"
+        config.vm.provision :shell, :inline => "mv /tmp/vagrantfile-user-data /var/lib/coreos-vagrant/", :privileged => true
+      end
+
+    end
   end
 end

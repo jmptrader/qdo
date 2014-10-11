@@ -9,23 +9,15 @@ fi
 
 # Build file must exist.
 if [ ! -f "qdo" ]; then
-    echo "Qdo not found, compile with: go build"
+    echo "QDo not found, compile with: go build"
     exit 1
 fi
 
 # Copy binary.
-#if [ -f "/etc/init/qdo.conf" ]; then
-#    service qdo stop
-#fi
-cp qdo /usr/bin/qdo
-
-# Setup templates and static files.
-if [ -d "/opt/qdo" ]; then
-    rm -r /opt/qdo
+if [ -f "/etc/init/qdo.conf" ]; then
+    service qdo stop
 fi
-mkdir /opt/qdo
-cp -r web/template /opt/qdo/
-cp -r web/static /opt/qdo/
+cp qdo /usr/bin/qdo
 
 # Setup upstart script.
 cp qdo.conf /etc/init/

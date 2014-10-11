@@ -1,0 +1,39 @@
+{{define "main"}}
+<div class="content dashboard">
+  <h1 class="title"><a href="/">{{.Title}}</a></h1>
+  <div class="new">
+    <a href="/queue/new">Create Queue</a>
+  </div>
+  <div>
+    {{if .Result}}
+    <table>
+      <thead>
+        <tr>
+          <th class="id">Queue ID</th>
+          <th class="status">Status</th>
+          <th class="processing">Processing</th>
+          <th class="waiting">Waiting</th>
+          <th class="scheduled">Scheduled</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Result}}
+        <tr>
+          <td><a href="/queue/{{.ID}}">{{.ID}}</a></td>
+          <td>{{.Status}}</td>
+          <td>{{.TasksProcessing}}</td>
+          <td>{{.TasksWaiting}}</td>
+          <td>{{.TasksScheduled}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    {{else}}
+      <div class="no-queues">
+        <i class="fa fa-hdd-o"></i>
+        <p>No queues created</p>
+      </div>
+    {{end}}
+  </div>
+</div>
+{{end}}

@@ -1,2 +1,4 @@
 .vagrant
-qdo
+qdo.sublime*
+Dockerfile
+Vagrantfile

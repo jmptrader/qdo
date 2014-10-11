@@ -2,27 +2,29 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
 
+	"github.com/borgenk/qdo/http"
 	"github.com/borgenk/qdo/log"
 	"github.com/borgenk/qdo/log/stdout"
 	"github.com/borgenk/qdo/log/syslog"
 	"github.com/borgenk/qdo/queue"
-	"github.com/borgenk/qdo/web"
+	"github.com/borgenk/qdo/store"
+	_ "github.com/borgenk/qdo/store/leveldb"
 )
 
-const Version = "0.2.1"
+const Version = "0.3.0"
 
 const defaultOptHttpPort = 8080
-const defaultOptHttpFilepath = "."
 const defaultOptDbFilepath = "qdo.db"
 const defaultOptSyslog = false
+const defaultOptStore = "leveldb"
 
 func main() {
 	optHttpPort := flag.Int("p", defaultOptHttpPort, "HTTP port")
-	optHttpDocumentRoot := flag.String("r", defaultOptHttpFilepath, "HTTP document root")
 	optDbFilepath := flag.String("f", defaultOptDbFilepath, "Database file path")
 	optSyslog := flag.Bool("s", defaultOptSyslog, "Log to syslog")
 	flag.Parse()
@@ -41,11 +43,14 @@ func main() {
 	log.Infof("starting QDo %s", Version)
 
 	// Launch web admin interface server.
-	go web.Run(*optHttpPort, *optHttpDocumentRoot)
+	go http.Run(*optHttpPort)
 
 	// Launch queue manager.
-	manager, err := queue.StartManager(*optDbFilepath)
+	store, _ := store.GetStoreConstructor(defaultOptStore, *optDbFilepath)
+
+	manager, err := queue.StartManager(store)
 	if err != nil {
+		fmt.Printf("%s", err)
 		panic("Unable to start manager")
 	}
 
@@ -53,6 +58,6 @@ func main() {
 	signal.Notify(exit, os.Interrupt, syscall.SIGTERM)
 	<-exit
 
-	log.Info("stopping, please wait..")
+	log.Info("stopping queues..")
 	manager.Stop()
 }

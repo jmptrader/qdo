@@ -1,0 +1,51 @@
+{{define "main"}}
+<div class="content view-queue">
+  <h1 class="title"><a href="/queue/{{.Result.Q.ID}}">Queue: {{.Result.Q.ID}}</a></h1>
+  <div class="conveyor">
+    <div class="section-header config">
+      <div>CONFIG</div>
+      <dl><dt>Max rate:</dt><dd>{{.Result.Q.Config.MaxRate}}<span class="unit">/s</span></dd></dl>
+      <dl><dt>Max concurrent:</dt><dd>{{.Result.Q.Config.MaxConcurrent}}</dd></dl>
+      <dl><dt>Max tries:</dt><dd>{{.Result.Q.Config.TaskMaxTries}}</dd></dl>
+      <dl><dt>Task timeout:</dt><dd>{{.Result.Q.Config.TaskTimeout}}<span class="unit">s</span></dd></dl>
+    </div>
+    <div class="stats">
+      <div class="section-header">STATS</div>
+      <dl><dt>Tasks waiting:</dt><dd>{{.Result.Stats.InQueue}}</dd></dl>
+      <dl><dt>Tasks processing:</dt><dd>{{.Result.Stats.InProcessing}}</dd></dl>
+      <dl><dt>Tasks scheduled:</dt><dd>{{.Result.Stats.InScheduled}}</dd></dl>
+      <dl><dt>Total tasks:</dt><dd>{{.Result.Stats.TotalProcessed}}</dd></dl>
+      <dl><dt>Total tasks ok:</dt><dd>{{.Result.Stats.TotalProcessedOK}}</dd></dl>
+      <dl><dt>Total tasks rescheduled:</dt><dd>{{.Result.Stats.TotalProcessedRescheduled}}</dd></dl>
+      <dl><dt>Total tasks error:</dt><dd>{{.Result.Stats.TotalProcessedError}}</dd></dl>
+    </div>
+  </div>
+  <div class="tasks queue">
+    <div class="tabs">
+      <a href="/queue/{{.Result.Q.ID}}"{{if eq .Result.Type ""}} class="active"{{end}}>Waiting</a>
+      <a href="/queue/{{.Result.Q.ID}}/scheduled"{{if eq .Result.Type "scheduled"}} class="active"{{end}}>Scheduled</a>
+      <div class="clear"></div>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Task ID</th>
+          <th>Target</th>
+          <th>Tries</th>
+          <th>Delay</th>
+        </tr>
+      </thead>
+      <tbody>
+      {{ range .Result.Tasks }}
+        <tr>
+          <td>{{ShortID .ID}}</td>
+          <td>{{.Target}}</td>
+          <td>{{.Tries}}</td>
+          <td>{{.Delay}}</td>
+        </tr>
+      {{ end }}
+      </tbody>
+    </table>
+  </div>
+</div>
+{{end}}

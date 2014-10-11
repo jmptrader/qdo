@@ -1,38 +1,54 @@
 QDo
 ======================
-A LevelDB queue implementation written in Golang.
+A queue implementation written in Golang. Currently using leveldb library as
+storage backend.
 
 
-Create conveyor
+# Disclaimer: this is a toy project.
 
-    curl http://127.0.0.1:8080/api/conveyor \
-       -d conveyor_id=foo \
+# Usage
+Create queue
+
+    curl http://127.0.0.1:7999/api/queue \
+       -d queue_id=foo \
        -d max_concurrent=2 \
        -d max_rate=100 \
        -d task_timeout=60 \
-       -d task_max_tries=10
+       -d task_max_tries=3
 
-Delete conveyor
+Delete queue
 
-    curl -X DELETE http://127.0.0.1:8080/api/conveyor/foo
+    curl -X DELETE http://127.0.0.1:7999/api/queue/foo
 
 Create task
 
-    curl http://127.0.0.1:8080/api/conveyor/foo/task \
+    curl http://127.0.0.1:7999/api/queue/foo/task \
        -d target=http://127.0.0.1/mytask \
        -d "payload={'foo': 'bar'}"
 
 Create scheduled task
 
-    curl http://127.0.0.1:8080/api/conveyor/foo/task \
+    curl http://127.0.0.1:8080/api/queue/foo/task \
        -d target=http://127.0.0.1/mytask \
        -d scheduled=1399999999 \
        -d "payload={'foo': 'bar'}"
 
 Delete all tasks
 
-    curl -X DELETE http://127.0.0.1:8080/api/conveyor/foo/task
+    curl -X DELETE http://127.0.0.1:8080/api/queue/foo/task
 
-Get conveyor stats
+Get queue stats
 
-    curl http://127.0.0.1:8080/api/conveyor/foo/stats
+    curl http://127.0.0.1:8080/api/queue/foo/stats
+
+
+# Build binfile with go-bindata
+## Install
+go get github.com/jteeuwen/go-bindata/...
+cd /gopath/src/github.com/jteeuwen/go-bindata
+go install
+
+## Generate binfile
+cd http
+go-bindata -pkg http static/ static/fonts template
+
