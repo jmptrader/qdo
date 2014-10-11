@@ -18,14 +18,14 @@ import (
 
 const Version = "0.3.0"
 
-const defaultOptHttpPort = 8080
-const defaultOptDbFilepath = "qdo.db"
+const defaultOptHTTPPort = 7999
+const defaultOptDBFilepath = "/var/qdo/"
 const defaultOptSyslog = false
 const defaultOptStore = "leveldb"
 
 func main() {
-	optHttpPort := flag.Int("p", defaultOptHttpPort, "HTTP port")
-	optDbFilepath := flag.String("f", defaultOptDbFilepath, "Database file path")
+	optHTTPPort := flag.Int("p", defaultOptHTTPPort, "HTTP port")
+	optDBFilepath := flag.String("f", defaultOptDBFilepath, "Database file path")
 	optSyslog := flag.Bool("s", defaultOptSyslog, "Log to syslog")
 	flag.Parse()
 
@@ -43,10 +43,10 @@ func main() {
 	log.Infof("starting QDo %s", Version)
 
 	// Launch web admin interface server.
-	go http.Run(*optHttpPort)
+	go http.Run(*optHTTPPort)
 
 	// Launch queue manager.
-	store, _ := store.GetStoreConstructor(defaultOptStore, *optDbFilepath)
+	store, _ := store.GetStoreConstructor(defaultOptStore, *optDBFilepath)
 
 	manager, err := queue.StartManager(store)
 	if err != nil {
