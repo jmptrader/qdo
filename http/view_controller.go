@@ -94,10 +94,20 @@ func viewDashboard(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 }
 
 type QueueView struct {
-	Q     *queue.QueueManager
-	Type  string
-	Stats *StatsResponse
-	Tasks *[]queue.Task
+	Q                 *queue.QueueManager
+	Type              string
+	Stats             *StatsResponse
+	Tasks             *[]queue.Task
+	AddPerc50         float64
+	AddPerc90         float64
+	AddPerc99         float64
+	ProcessingPerc50  float64
+	ProcessingPerc90  float64
+	ProcessingPerc99  float64
+	ChartInQueuePct   float64
+	ChartScheduledPct float64
+	ChartSucceededPct float64
+	ChartErrorPct     float64
 }
 
 func viewQueue(w stdhttp.ResponseWriter, r *stdhttp.Request) {
@@ -114,6 +124,34 @@ func viewQueue(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 
 	qView.Stats = &StatsResponse{}
 	qView.Stats.Get(q)
+
+	qView.ChartInQueuePct = 0
+	qView.ChartScheduledPct = 0
+	qView.ChartSucceededPct = 0
+	qView.ChartErrorPct = 0
+
+	chartStatusTotal := qView.Stats.InQueue + qView.Stats.InScheduled
+	if qView.Stats.InQueue > 0 {
+		qView.ChartInQueuePct = (float64(qView.Stats.InQueue) / float64(chartStatusTotal)) * float64(100)
+	}
+	if qView.Stats.InScheduled > 0 {
+		qView.ChartScheduledPct = (float64(qView.Stats.InScheduled) / float64(chartStatusTotal)) * float64(100)
+	}
+	chartResultsTotal := qView.Stats.TotalProcessedOK + qView.Stats.TotalProcessedError
+	if qView.Stats.TotalProcessedOK > 0 {
+		qView.ChartSucceededPct = (float64(qView.Stats.TotalProcessedOK) / float64(chartResultsTotal)) * float64(100)
+	}
+	if qView.Stats.TotalProcessedError > 0 {
+		qView.ChartErrorPct = (float64(qView.Stats.TotalProcessedError) / float64(chartResultsTotal)) * float64(100)
+	}
+
+	qView.AddPerc50 = q.StatsAddQuantile.Query(0.50)
+	qView.AddPerc90 = q.StatsAddQuantile.Query(0.90)
+	qView.AddPerc99 = q.StatsAddQuantile.Query(0.99)
+
+	qView.ProcessingPerc50 = q.StatsProcessingQuantile.Query(0.50)
+	qView.ProcessingPerc90 = q.StatsProcessingQuantile.Query(0.90)
+	qView.ProcessingPerc99 = q.StatsProcessingQuantile.Query(0.99)
 
 	if vars["type"] == "" {
 		qView.Tasks, err = q.GetTasks()

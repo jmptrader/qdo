@@ -27,10 +27,8 @@ type Stats struct {
 	InQueue                   AtomicInt
 	InScheduled               AtomicInt
 	InProcessing              AtomicInt
-	TotalProcessed            AtomicInt
+	TotalReceived             AtomicInt
 	TotalProcessedOK          AtomicInt
 	TotalProcessedError       AtomicInt
 	TotalProcessedRescheduled AtomicInt
-	TotalTime                 AtomicInt
-	TimeLastOK                AtomicInt
 }

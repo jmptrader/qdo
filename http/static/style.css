@@ -217,17 +217,94 @@ dl dd {
   color: #C8C8C8;
 }
 
-.view-queue .config,
-.view-queue .stats {
-  float: left;
-  height: 250px;
-  width: 50%
+.view-queue .section {
+  margin-bottom: 46px;
 }
-.view-queue dl {
-  padding-right: 40px;
+.view-queue .sub-section {
+  margin-bottom: 10px;
 }
-.view-queue .section-header {
+.view-queue .section-label {
+  border-bottom: 2px solid #ECECEC;
   font-size: 0.9rem;
+  margin-bottom: 16px;
+  padding-bottom: 4px;
+}
+.view-queue .seen {
+  font-size: 20px;
+  margin-bottom: 20px;
+  color: #6E6E6E;
+}
+.view-queue .seen span {
+  font-size: 36px;
+}
+.view-queue .chart-wrapper {
+  margin-bottom: 16px;
+}
+.view-queue .chart-wrapper .section-label {
+  border: none;
+  margin-bottom: 4px;
+}
+.view-queue .chart {
+  overflow: hidden;
+}
+.view-queue .chart .label tr {
+  background-color: #FFFFFF;
+}
+.view-queue .chart .label td {
+  text-align: center;
+}
+.view-queue .bar-wrapper {
+  background-color: #F4F4F4;
+  height: 26px;
+  width: 100%;
+}
+.view-queue .bar {
+  float: left;
+  height: 26px;
+  margin-bottom: 4px;
+  background-color: #F5F5F5;
+}
+.view-queue .bar-left {
+  background-color: #37E29B;
+}
+.view-queue .bar-right {
+  background-color: #526F7C;
+}
+.view-queue .chart .label {
+  color: #BEBEBE;
+}
+.view-queue .chart .label span {
+  font-weight: normal;
+  margin-right: 4px;
+  color: #BEBEBE;
+}
+.view-queue .chart .label-left {
+  float: left;
+}
+.view-queue .chart .label-right {
+  float: right;
+}
+.view-queue .config table th {
+  color: #BEBEBE;
+}
+.view-queue .config table tr {
+  background-color: #FFFFFF;
+}
+.view-queue .config table td {
+  text-align: left;
+}
+.view-queue .performance table th {
+  color: #BEBEBE;
+}
+.view-queue .performance table tr {
+  background-color: #FFFFFF;
+}
+.view-queue .performance table td {
+  text-align: left;
+}
+.view-queue .performance table td .value {
+  font-size: 22px;
+  margin-right: 2px;
 }
 .view-queue .tabs {
   border-bottom: 2px solid #ECECEC;

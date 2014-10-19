@@ -1,28 +1,90 @@
 {{define "main"}}
 <div class="content view-queue">
   <h1 class="title"><a href="/queue/{{.Result.Q.ID}}">Queue: {{.Result.Q.ID}}</a></h1>
-  <div class="conveyor">
-    <div class="section-header config">
-      <div>CONFIG</div>
-      <dl><dt>Max rate:</dt><dd>{{.Result.Q.Config.MaxRate}}<span class="unit">/s</span></dd></dl>
-      <dl><dt>Max concurrent:</dt><dd>{{.Result.Q.Config.MaxConcurrent}}</dd></dl>
-      <dl><dt>Max tries:</dt><dd>{{.Result.Q.Config.TaskMaxTries}}</dd></dl>
-      <dl><dt>Task timeout:</dt><dd>{{.Result.Q.Config.TaskTimeout}}<span class="unit">s</span></dd></dl>
+  <div class="section">
+    <div class="seen"><span>{{.Result.Stats.TotalReceived}}</span> tasks received</div>
+    <div class="chart-wrapper chart-status">
+      <div class="section-label">STATUS</div>
+      <div class="chart">
+        <div class="bar-wrapper">
+          <div class="in-queue bar bar-left" style="width:{{.Result.ChartInQueuePct}}%"></div>
+          <div class="scheduled bar bar-right" style="width:{{.Result.ChartScheduledPct}}%"></div>
+        </div>
+        <table class="label">
+          <tr>
+            <td width="45%">{{.Result.Stats.InQueue}} in queue</td>
+            <td width="10%">- / -</td>
+            <td width="45%">{{.Result.Stats.InScheduled}} scheduled</td>
+          </tr>
+        </table>
+      </div>
     </div>
-    <div class="stats">
-      <div class="section-header">STATS</div>
-      <dl><dt>Tasks waiting:</dt><dd>{{.Result.Stats.InQueue}}</dd></dl>
-      <dl><dt>Tasks processing:</dt><dd>{{.Result.Stats.InProcessing}}</dd></dl>
-      <dl><dt>Tasks scheduled:</dt><dd>{{.Result.Stats.InScheduled}}</dd></dl>
-      <dl><dt>Total tasks:</dt><dd>{{.Result.Stats.TotalProcessed}}</dd></dl>
-      <dl><dt>Total tasks ok:</dt><dd>{{.Result.Stats.TotalProcessedOK}}</dd></dl>
-      <dl><dt>Total tasks rescheduled:</dt><dd>{{.Result.Stats.TotalProcessedRescheduled}}</dd></dl>
-      <dl><dt>Total tasks error:</dt><dd>{{.Result.Stats.TotalProcessedError}}</dd></dl>
+    <div class="chart-wrapper chart-results">
+      <div class="section-label">RESULTS</div>
+      <div class="chart">
+        <div class="bar-wrapper">
+          <div class="processed-ok bar bar-left" style="width:{{.Result.ChartSucceededPct}}%"></div>
+          <div class="processed-error bar bar-right" style="width:{{.Result.ChartErrorPct}}%"></div>
+        </div>
+        <table class="label">
+          <tr>
+            <td width="45%">{{.Result.Stats.TotalProcessedOK}} succeeded</td>
+            <td width="10%">- / -</td>
+            <td width="45%">{{.Result.Stats.TotalProcessedError}} error</td>
+          </tr>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="config section">
+    <div class="section-label">CONFIGURATION</div>
+    <table>
+      <tr>
+        <th>Max rate</th>
+        <th>Max concurrent</th>
+        <th>Max tries</th>
+        <th>Task timeout</th>
+      </tr>
+      <tr>
+        <td>{{.Result.Q.Config.MaxRate}}<span class="unit">/s</span></td>
+        <td>{{.Result.Q.Config.MaxConcurrent}}</td>
+        <td>{{.Result.Q.Config.TaskMaxTries}}</td>
+        <td>{{.Result.Q.Config.TaskTimeout}}<span class="unit">/s</span></td>
+      </tr>
+    </table>
+  </div>
+  <div class="performance section">
+    <div class="section-label">PERFORMANCE</div>
+    <div>
+      <table>
+        <tr>
+          <th></th>
+          <th>50th percentile</th>
+          <th>90th percentile</th>
+          <th>99th percentile</th>
+        </tr>
+        <tr>
+        <td><div class="sub-section-label">Adding</div></td>
+        <td><span class="value">{{.Result.AddPerc50}}</span>ms</td>
+        <td><span class="value">{{.Result.AddPerc90}}</span>ms</td>
+        <td><span class="value">{{.Result.AddPerc99}}</span>ms</td>
+      </tr>
+      </table>
+    </div>
+    <div>
+      <table>
+        <tr>
+          <td><div class="sub-section-label">Processing</div></td>
+          <td><span class="value">{{.Result.ProcessingPerc50}}</span>ms</td>
+          <td><span class="value">{{.Result.ProcessingPerc90}}</span>ms</td>
+          <td><span class="value">{{.Result.ProcessingPerc99}}</span>ms</td>
+        </tr>
+      </table>
     </div>
   </div>
   <div class="tasks queue">
     <div class="tabs">
-      <a href="/queue/{{.Result.Q.ID}}"{{if eq .Result.Type ""}} class="active"{{end}}>Waiting</a>
+      <a href="/queue/{{.Result.Q.ID}}"{{if eq .Result.Type ""}} class="active"{{end}}>In queue</a>
       <a href="/queue/{{.Result.Q.ID}}/scheduled"{{if eq .Result.Type "scheduled"}} class="active"{{end}}>Scheduled</a>
       <div class="clear"></div>
     </div>

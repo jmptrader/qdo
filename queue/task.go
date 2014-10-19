@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
-	"time"
 
 	"github.com/borgenk/qdo/log"
 )
@@ -63,9 +62,6 @@ func (t *Task) String() string {
 func (t *Task) Process(queueID *string, client *http.Client, config *Config, stats *Stats) error {
 	log.Infof("queue/%s/task/%s - processing:\n%s", *queueID, t.ID, t.String())
 
-	startTime := time.Now()
-	stats.TotalProcessed.Add(1)
-
 	_, err := url.Parse(t.Target)
 	if err != nil {
 		// Assume invalid task, discard it.
@@ -87,9 +83,6 @@ func (t *Task) Process(queueID *string, client *http.Client, config *Config, sta
 	if err == nil && resp.StatusCode >= 200 && resp.StatusCode <= 299 {
 		// Task processed successfully.
 		log.Infof("queue/%s/task/%s - completed successfully: %s", *queueID, t.ID, resp.Status)
-		timeSpent := int64(time.Now().Sub(startTime))
-		stats.TotalTime.Add(timeSpent)
-		stats.TimeLastOK.Set(timeSpent)
 		stats.TotalProcessedOK.Add(1)
 		return nil
 	} else if err == nil && resp.StatusCode >= 400 && resp.StatusCode <= 499 {

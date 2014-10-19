@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/borgenk/qdo/third_party/github.com/bmizerany/perks/quantile"
+
 	"github.com/borgenk/qdo/log"
 	"github.com/borgenk/qdo/store"
 )
@@ -20,9 +22,9 @@ const (
 
 // NewQueue creates a new queue ready to handle tasks after running
 // initialize on it self.
-func NewQueue(conveyorID string, config *Config, db store.Store, wg *sync.WaitGroup) *QueueManager {
+func NewQueue(queueID string, config *Config, db store.Store, wg *sync.WaitGroup) *QueueManager {
 	q := &QueueManager{
-		ID:        conveyorID,
+		ID:        queueID,
 		CreatedAt: time.Now(),
 		Config:    config,
 		Stats:     &Stats{},
@@ -32,18 +34,20 @@ func NewQueue(conveyorID string, config *Config, db store.Store, wg *sync.WaitGr
 }
 
 type QueueManager struct {
-	ID            string
-	CreatedAt     time.Time
-	Config        *Config
-	Stats         *Stats
-	db            store.Store
-	httpClient    *stdhttp.Client
-	newTaskID     chan string
-	notifySignal  chan systemSignal
-	mWaitGroup    *sync.WaitGroup
-	qmWaitGroup   *sync.WaitGroup
-	waitQueue     *waitQueue
-	scheduleQueue *scheduleQueue
+	ID                      string
+	CreatedAt               time.Time
+	Config                  *Config
+	Stats                   *Stats
+	StatsAddQuantile        *quantile.Stream
+	StatsProcessingQuantile *quantile.Stream
+	db                      store.Store
+	httpClient              *stdhttp.Client
+	newTaskID               chan string
+	notifySignal            chan systemSignal
+	mWaitGroup              *sync.WaitGroup
+	qmWaitGroup             *sync.WaitGroup
+	waitQueue               *waitQueue
+	scheduleQueue           *scheduleQueue
 }
 
 func (q *QueueManager) Initialize(mWaitGroup *sync.WaitGroup) *QueueManager {
@@ -62,6 +66,10 @@ func (q *QueueManager) Initialize(mWaitGroup *sync.WaitGroup) *QueueManager {
 	// Initialize HTTP client.
 	q.initHTTPClient()
 
+	// Initialize quantile stats.
+	q.StatsAddQuantile = quantile.NewTargeted(0.50, 0.90, 0.99)
+	q.StatsProcessingQuantile = quantile.NewTargeted(0.50, 0.90, 0.99)
+
 	// Task ID generator.
 	// http://blog.cloudflare.com/go-at-cloudflare
 	q.newTaskID = make(chan string)
@@ -73,6 +81,8 @@ func (q *QueueManager) Initialize(mWaitGroup *sync.WaitGroup) *QueueManager {
 			q.newTaskID <- fmt.Sprintf("%x", h.Sum(nil))
 		}
 	}()
+
+	// TODO: Fill stats (in waiting, in schedule, etc)
 
 	return q
 }
@@ -142,6 +152,8 @@ func (q *QueueManager) processTask(task *Task) {
 			q.qmWaitGroup.Done()
 		}()
 
+		start := time.Now()
+
 		k := task.Key
 
 		err := task.Process(&q.ID, q.httpClient, q.Config, q.Stats)
@@ -158,6 +170,9 @@ func (q *QueueManager) processTask(task *Task) {
 			if err != nil {
 				panic("Unable to add task to schedule queue")
 			}
+		} else if err == nil {
+			elapsed := time.Since(start)
+			q.StatsProcessingQuantile.Insert(float64(elapsed / time.Millisecond))
 		}
 		err = q.waitQueue.Delete(k)
 		if err != nil {
@@ -167,6 +182,7 @@ func (q *QueueManager) processTask(task *Task) {
 }
 
 func (q *QueueManager) AddTask(target, payload string, scheduled int64) (*Task, error) {
+	start := time.Now()
 	task := &Task{
 		ID:      <-q.newTaskID,
 		Target:  target,
@@ -174,7 +190,6 @@ func (q *QueueManager) AddTask(target, payload string, scheduled int64) (*Task, 
 		Tries:   0,
 		Delay:   0,
 	}
-
 	if scheduled == 0 {
 		// Normal task.
 		err = q.waitQueue.Add(task)
@@ -188,6 +203,9 @@ func (q *QueueManager) AddTask(target, payload string, scheduled int64) (*Task, 
 			return nil, err
 		}
 	}
+	q.Stats.TotalReceived.Add(1)
+	elapsed := time.Since(start)
+	q.StatsAddQuantile.Insert(float64(elapsed / time.Millisecond))
 	return task, nil
 }
 

@@ -6,23 +6,23 @@
       <label>Queue name</label>
       <input type="text" name="queue_id" id="id" placeholder="" title="" value="" pattern="[a-zA-Z0-9\-]{3,}" required autofocus>
     </div>
-    <div class="input concurrent">
-      <label>Concurrent workers</label>
-      <input type="text" name="max_concurrent" id="max-concurrent" placeholder="" title="Maximum number of tasks running at once" pattern="[0-9]{1,}" required>
-      <p>Maximum number of tasks running at once</p>
-    </div>
     <div class="input rate">
       <label>Max rate/s</label>
       <input type="text" name="max_rate" id="max-rate" placeholder="" title="Maxium number of tasks processed per second" pattern="[0-9]{1,}" required>
       <p>Maxium number of tasks processed per second</p>
     </div>
-    <div class="input timeout">
-      <label>Task timeout</label>
-      <input type="text" name="task_timeout" id="task-timeout" placeholder="" title="Task timeout" pattern="[0-9]{1,}" required>
+    <div class="input concurrent">
+      <label>Concurrent workers</label>
+      <input type="text" name="max_concurrent" id="max-concurrent" placeholder="" title="Maximum number of tasks running at once" pattern="[0-9]{1,}" required>
+      <p>Maximum number of tasks running at once</p>
     </div>
     <div class="input tries">
       <label>Task max tries</label>
       <input type="text" name="task_max_tries" id="task-max-tries" placeholder="" title="Task max tries" pattern="[0-9]{1,}" required>
+    </div>
+    <div class="input timeout">
+      <label>Task timeout</label>
+      <input type="text" name="task_timeout" id="task-timeout" placeholder="" title="Task timeout" pattern="[0-9]{1,}" required>
     </div>
     <div class="buttons">
       <button type="submit" class="btn">Create</button>

@@ -187,10 +187,6 @@ func CreateTask(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		stdhttp.Error(w, err.Error(), stdhttp.StatusInternalServerError)
 		return
 	}
-	if q == nil {
-		stdhttp.Error(w, "queue id does not exsist", stdhttp.StatusBadRequest)
-		return
-	}
 	scheduled := 0
 	if r.FormValue("scheduled") != "" {
 		scheduled, err = strconv.Atoi(r.FormValue("scheduled"))
@@ -199,7 +195,6 @@ func CreateTask(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 			return
 		}
 	}
-
 	res, err := q.AddTask(r.FormValue("target"), r.FormValue("payload"),
 		int64(scheduled))
 	if err != nil {
@@ -236,24 +231,20 @@ type StatsResponse struct {
 	InQueue                   int64  `json:"in_queue"`
 	InProcessing              int64  `json:"in_processing"`
 	InScheduled               int64  `json:"in_scheduled"`
-	TotalProcessed            int64  `json:"total_processed"`
+	TotalReceived             int64  `json:"total_received"`
 	TotalProcessedOK          int64  `json:"total_processed_ok"`
 	TotalProcessedError       int64  `json:"total_processed_error"`
 	TotalProcessedRescheduled int64  `json:"total_processed_rescheduled"`
-	TotalTime                 int64  `json:"total_time"`
-	TimeLastOK                int64  `json:"time_last_ok"`
 }
 
 func (s *StatsResponse) Get(q *queue.QueueManager) {
 	s.InQueue = q.Stats.InQueue.Get()
 	s.InProcessing = q.Stats.InProcessing.Get()
 	s.InScheduled = q.Stats.InScheduled.Get()
-	s.TotalProcessed = q.Stats.TotalProcessed.Get()
+	s.TotalReceived = q.Stats.TotalReceived.Get()
 	s.TotalProcessedOK = q.Stats.TotalProcessedOK.Get()
 	s.TotalProcessedError = q.Stats.TotalProcessedError.Get()
 	s.TotalProcessedRescheduled = q.Stats.TotalProcessedRescheduled.Get()
-	s.TotalTime = q.Stats.TotalTime.Get()
-	s.TimeLastOK = q.Stats.TimeLastOK.Get()
 }
 
 // API handler for GET /api/queue/{queue_id}/stats
