@@ -4,9 +4,9 @@ A queue implementation written in Golang. Currently using leveldb library as
 storage backend.
 
 
-# Disclaimer: this is a toy project.
+**Disclaimer: Pet project**
 
-# Usage
+### Usage
 Create queue
 
     curl http://127.0.0.1:7999/api/queue \
@@ -42,13 +42,15 @@ Get queue stats
     curl http://127.0.0.1:7999/api/queue/foo/stats
 
 
-# Build binfile with go-bindata
-## Install
-go get github.com/jteeuwen/go-bindata/...
-cd /gopath/src/github.com/jteeuwen/go-bindata
-go install
+#### Build binfile with go-bindata
+Install
 
-## Generate binfile
-cd http
-go-bindata -pkg http static/ static/fonts template
+    go get github.com/jteeuwen/go-bindata/...
+    cd /gopath/src/github.com/jteeuwen/go-bindata
+    go install
+
+Generate binfile
+
+    cd http
+    go-bindata -pkg http static/ static/fonts template
 
