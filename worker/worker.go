@@ -1,4 +1,4 @@
-package queue
+package worker
 
 import (
 	"crypto/sha1"
@@ -10,15 +10,26 @@ import (
 
 	"github.com/borgenk/qdo/third_party/github.com/bmizerany/perks/quantile"
 
+	"github.com/borgenk/qdo/config"
 	"github.com/borgenk/qdo/log"
 	"github.com/borgenk/qdo/store"
 )
 
+type systemSignal int
+
 const (
-	queueKey         string = "q"
-	waitQueueKey     string = "w"
-	scheduleQueueKey string = "s"
+	start  systemSignal = iota
+	pause  systemSignal = iota
+	resume systemSignal = iota
+	stop   systemSignal = iota
 )
+
+type Config struct {
+	MaxConcurrent int32 `json:"max_concurrent"` // Number of simultaneous workers processing tasks.
+	MaxRate       int32 `json:"max_rate"`       // Number of maxium task invocations from queue per second.
+	TaskTimeout   int32 `json:"task_timeout"`   // Duration allowed per task to complete in seconds.
+	TaskMaxTries  int32 `json:"task_max_tries"` // Number of tries per task before giving up. Set 0 for unlimited retries.
+}
 
 // NewQueue creates a new queue ready to handle tasks after running
 // initialize on it self.
@@ -27,19 +38,17 @@ func NewQueue(queueID string, config *Config, db store.Store, wg *sync.WaitGroup
 		ID:        queueID,
 		CreatedAt: time.Now(),
 		Config:    config,
-		Stats:     &Stats{},
-		db:        db,
 	}
-	return q.Initialize(wg)
+	return q.Initialize(db, wg)
 }
 
 type QueueManager struct {
 	ID                      string
 	CreatedAt               time.Time
 	Config                  *Config
-	Stats                   *Stats
-	StatsAddQuantile        *quantile.Stream
-	StatsProcessingQuantile *quantile.Stream
+	stats                   *Stats
+	statsAddQuantile        *quantile.Stream
+	statsProcessingQuantile *quantile.Stream
 	db                      store.Store
 	httpClient              *stdhttp.Client
 	newTaskID               chan string
@@ -50,7 +59,11 @@ type QueueManager struct {
 	scheduleQueue           *scheduleQueue
 }
 
-func (q *QueueManager) Initialize(mWaitGroup *sync.WaitGroup) *QueueManager {
+func (q *QueueManager) Initialize(db store.Store, mWaitGroup *sync.WaitGroup) *QueueManager {
+	q.db = db
+
+	q.stats = &Stats{}
+
 	// Signals events to queue lines (i.e. stop).
 	q.notifySignal = make(chan systemSignal)
 
@@ -67,8 +80,8 @@ func (q *QueueManager) Initialize(mWaitGroup *sync.WaitGroup) *QueueManager {
 	q.initHTTPClient()
 
 	// Initialize quantile stats.
-	q.StatsAddQuantile = quantile.NewTargeted(0.50, 0.90, 0.99)
-	q.StatsProcessingQuantile = quantile.NewTargeted(0.50, 0.90, 0.99)
+	q.statsAddQuantile = quantile.NewTargeted(0.50, 0.90, 0.99)
+	q.statsProcessingQuantile = quantile.NewTargeted(0.50, 0.90, 0.99)
 
 	// Task ID generator.
 	// http://blog.cloudflare.com/go-at-cloudflare
@@ -90,13 +103,13 @@ func (q *QueueManager) Initialize(mWaitGroup *sync.WaitGroup) *QueueManager {
 // initInternalQueues initializes the internal queue lines; wait and
 // schedule queue.
 func (q *QueueManager) initInternalQueues() {
-	q.waitQueue = NewWaitQueue(q.ID, q.Config, &q.Stats.InQueue, q.db, q.notifySignal,
-		[]byte(queueKey+prefix+q.ID+prefix+waitQueueKey+prefix),
-		[]byte(queueKey+prefix+q.ID+prefix+waitQueueKey+suffix))
+	q.waitQueue = NewWaitQueue(q.ID, q.Config, &q.stats.InQueue, q.db, q.notifySignal,
+		[]byte(config.QueueKey+config.Prefix+q.ID+config.Prefix+config.WaitQueueKey+config.Prefix),
+		[]byte(config.QueueKey+config.Prefix+q.ID+config.Prefix+config.WaitQueueKey+config.Suffix))
 
-	q.scheduleQueue = NewScheduleQueue(q.ID, q.Config, &q.Stats.InScheduled, q.db, q.notifySignal,
-		[]byte(queueKey+prefix+q.ID+prefix+scheduleQueueKey+prefix),
-		[]byte(queueKey+prefix+q.ID+prefix+scheduleQueueKey+suffix))
+	q.scheduleQueue = NewScheduleQueue(q.ID, q.Config, &q.stats.InScheduled, q.db, q.notifySignal,
+		[]byte(config.QueueKey+config.Prefix+q.ID+config.Prefix+config.ScheduleQueueKey+config.Prefix),
+		[]byte(config.QueueKey+config.Prefix+q.ID+config.Prefix+config.ScheduleQueueKey+config.Suffix))
 }
 
 // initHTTPClient initializes the HTTP client.
@@ -137,7 +150,7 @@ func (q *QueueManager) Stop() {
 }
 
 func (q *QueueManager) rescheduleTask(task *Task) {
-	err = q.waitQueue.Add(task)
+	err := q.waitQueue.Add(task)
 	if err != nil {
 		panic("Unable to add task to wait queue")
 	}
@@ -156,7 +169,7 @@ func (q *QueueManager) processTask(task *Task) {
 
 		k := task.Key
 
-		err := task.Process(&q.ID, q.httpClient, q.Config, q.Stats)
+		err := task.Process(&q.ID, q.httpClient, q.Config, q.stats)
 		if err == ErrTaskMaxTries {
 			// Do nothing.
 		} else if err != nil {
@@ -172,7 +185,7 @@ func (q *QueueManager) processTask(task *Task) {
 			}
 		} else if err == nil {
 			elapsed := time.Since(start)
-			q.StatsProcessingQuantile.Insert(float64(elapsed / time.Millisecond))
+			q.statsProcessingQuantile.Insert(float64(elapsed / time.Millisecond))
 		}
 		err = q.waitQueue.Delete(k)
 		if err != nil {
@@ -192,20 +205,20 @@ func (q *QueueManager) AddTask(target, payload string, scheduled int64) (*Task, 
 	}
 	if scheduled == 0 {
 		// Normal task.
-		err = q.waitQueue.Add(task)
+		err := q.waitQueue.Add(task)
 		if err != nil {
 			return nil, err
 		}
 	} else {
 		// Delayed task.
-		err = q.scheduleQueue.Add(task, scheduled)
+		err := q.scheduleQueue.Add(task, scheduled)
 		if err != nil {
 			return nil, err
 		}
 	}
-	q.Stats.TotalReceived.Add(1)
+	q.stats.TotalReceived.Add(1)
 	elapsed := time.Since(start)
-	q.StatsAddQuantile.Insert(float64(elapsed / time.Millisecond))
+	q.statsAddQuantile.Insert(float64(elapsed / time.Millisecond))
 	return task, nil
 }
 
@@ -219,4 +232,15 @@ func (q *QueueManager) GetScheduledTasks() (*[]Task, error) {
 
 func (q *QueueManager) Flush() error {
 	return nil
+}
+func (q *QueueManager) GetStats() *Stats {
+	return q.stats
+}
+
+func (q *QueueManager) GetStatsAddQuantile() *quantile.Stream {
+	return q.statsAddQuantile
+}
+
+func (q *QueueManager) GetStatsProcessingQuantile() *quantile.Stream {
+	return q.statsProcessingQuantile
 }

@@ -1,4 +1,4 @@
-package queue
+package worker
 
 import (
 	"bytes"
@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strconv"
 
+	"github.com/borgenk/qdo/config"
 	"github.com/borgenk/qdo/log"
 )
 
@@ -105,7 +106,7 @@ func (t *Task) Process(queueID *string, client *http.Client, config *Config, sta
 
 func UnserializeTask(key, value []byte) *Task {
 	task := &Task{}
-	i := bytes.LastIndex(key, []byte(prefix))
+	i := bytes.LastIndex(key, []byte(config.Prefix))
 	ts := int32(binary.LittleEndian.Uint32(value[12:16]))
 
 	task.ID = string(key[i+1 : len(key)])

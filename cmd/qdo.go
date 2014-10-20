@@ -7,11 +7,11 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/borgenk/qdo/core"
 	"github.com/borgenk/qdo/http"
 	"github.com/borgenk/qdo/log"
 	"github.com/borgenk/qdo/log/stdout"
 	"github.com/borgenk/qdo/log/syslog"
-	"github.com/borgenk/qdo/queue"
 	"github.com/borgenk/qdo/store"
 	_ "github.com/borgenk/qdo/store/leveldb"
 )
@@ -25,7 +25,7 @@ const defaultOptStore = "leveldb"
 
 func main() {
 	optHTTPPort := flag.Int("p", defaultOptHTTPPort, "HTTP port")
-	optDBFilepath := flag.String("f", defaultOptDBFilepath, "Database file path")
+	optDBFilepath := flag.String("f", defaultOptDBFilepath, "Database filepath")
 	optSyslog := flag.Bool("s", defaultOptSyslog, "Log to syslog")
 	flag.Parse()
 
@@ -48,16 +48,16 @@ func main() {
 	// Launch queue manager.
 	store, _ := store.GetStoreConstructor(defaultOptStore, *optDBFilepath)
 
-	manager, err := queue.StartManager(store)
+	manager, err := core.StartController(store)
 	if err != nil {
 		fmt.Printf("%s", err)
-		panic("Unable to start manager")
+		panic("Unable to start controller")
 	}
 
 	exit := make(chan os.Signal, 1)
 	signal.Notify(exit, os.Interrupt, syscall.SIGTERM)
 	<-exit
 
-	log.Info("stopping queues..")
+	log.Info("stopping..")
 	manager.Stop()
 }

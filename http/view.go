@@ -7,7 +7,8 @@ import (
 
 	"github.com/borgenk/qdo/third_party/github.com/gorilla/mux"
 
-	"github.com/borgenk/qdo/queue"
+	"github.com/borgenk/qdo/core"
+	"github.com/borgenk/qdo/worker"
 )
 
 var templateList = []string{
@@ -66,7 +67,7 @@ type QueueRow struct {
 }
 
 func viewDashboard(w stdhttp.ResponseWriter, r *stdhttp.Request) {
-	queues, err := queue.GetAllQueues()
+	queues, err := core.GetAllQueues()
 	if err != nil {
 		stdhttp.Error(w, "", stdhttp.StatusInternalServerError)
 		return
@@ -77,9 +78,9 @@ func viewDashboard(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		q := QueueRow{
 			ID:              v.ID,
 			Status:          "Active",
-			TasksProcessing: v.Stats.InProcessing.Get(),
-			TasksWaiting:    v.Stats.InQueue.Get(),
-			TasksScheduled:  v.Stats.InScheduled.Get(),
+			TasksProcessing: v.GetStats().InProcessing.Get(),
+			TasksWaiting:    v.GetStats().InQueue.Get(),
+			TasksScheduled:  v.GetStats().InScheduled.Get(),
 		}
 		res = append(res, q)
 	}
@@ -94,10 +95,10 @@ func viewDashboard(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 }
 
 type QueueView struct {
-	Q                 *queue.QueueManager
+	Q                 *worker.QueueManager
 	Type              string
 	Stats             *StatsResponse
-	Tasks             *[]queue.Task
+	Tasks             *[]worker.Task
 	AddPerc50         float64
 	AddPerc90         float64
 	AddPerc99         float64
@@ -113,7 +114,7 @@ type QueueView struct {
 func viewQueue(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	vars := mux.Vars(r)
 	queueID := vars["queue_id"]
-	q, err := queue.GetQueue(queueID)
+	q, err := core.GetQueue(queueID)
 	if err != nil {
 		return
 	}
@@ -145,13 +146,15 @@ func viewQueue(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		qView.ChartErrorPct = (float64(qView.Stats.TotalProcessedError) / float64(chartResultsTotal)) * float64(100)
 	}
 
-	qView.AddPerc50 = q.StatsAddQuantile.Query(0.50)
-	qView.AddPerc90 = q.StatsAddQuantile.Query(0.90)
-	qView.AddPerc99 = q.StatsAddQuantile.Query(0.99)
+	statsAddQuantile := q.GetStatsAddQuantile()
+	qView.AddPerc50 = statsAddQuantile.Query(0.50)
+	qView.AddPerc90 = statsAddQuantile.Query(0.90)
+	qView.AddPerc99 = statsAddQuantile.Query(0.99)
 
-	qView.ProcessingPerc50 = q.StatsProcessingQuantile.Query(0.50)
-	qView.ProcessingPerc90 = q.StatsProcessingQuantile.Query(0.90)
-	qView.ProcessingPerc99 = q.StatsProcessingQuantile.Query(0.99)
+	statsProcessingQuantile := q.GetStatsProcessingQuantile()
+	qView.ProcessingPerc50 = statsProcessingQuantile.Query(0.50)
+	qView.ProcessingPerc90 = statsProcessingQuantile.Query(0.90)
+	qView.ProcessingPerc99 = statsProcessingQuantile.Query(0.99)
 
 	if vars["type"] == "" {
 		qView.Tasks, err = q.GetTasks()

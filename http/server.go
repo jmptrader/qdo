@@ -50,7 +50,7 @@ func Run(port int) {
 	srv := &stdhttp.Server{
 		Addr:        fmt.Sprintf(":%d", port),
 		Handler:     r,
-		ReadTimeout: 20 * time.Second,
+		ReadTimeout: 30 * time.Second,
 	}
 	srv.ListenAndServe()
 }

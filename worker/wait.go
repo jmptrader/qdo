@@ -1,4 +1,4 @@
-package queue
+package worker
 
 import (
 	"bytes"
@@ -79,7 +79,7 @@ func (w *waitQueue) Run(fn func(*Task)) {
 				break
 			}
 
-			//log.Debugf("queue/%s/waitinglist: reading key %s", w.queueID, k)
+			//log.Debugf("queue/%s/waitinglist: reading key %s", w.ID, k)
 
 			// Block until conveyor is ready to process next task.
 			w.notifyReady <- 1
@@ -92,7 +92,7 @@ func (w *waitQueue) Run(fn func(*Task)) {
 			}
 		}
 
-		//log.Debugf("queue/%s/waitinglist: waiting on signal", w.queueID)
+		//log.Debugf("queue/%s/waitinglist: waiting on signal", w.ID)
 
 		iter.Close()
 
@@ -103,7 +103,7 @@ func (w *waitQueue) Run(fn func(*Task)) {
 }
 
 func (w *waitQueue) Add(task *Task) error {
-	err = w.add(task, time.Now().Unix())
+	err := w.add(task, time.Now().Unix())
 	if err != nil {
 		return err
 	}

@@ -1,4 +1,4 @@
-package queue
+package worker
 
 import (
 	"bytes"
@@ -61,7 +61,7 @@ func (s *scheduleQueue) Run(fn func(*Task)) {
 			//log.Debugf("queue/%s/scheduler - reading key %s", s.ID, k)
 
 			fn(UnserializeTask(k, v))
-			err = s.Delete(k)
+			err := s.Delete(k)
 			if err != nil {
 				panic("2")
 			}

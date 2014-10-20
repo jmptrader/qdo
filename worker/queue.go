@@ -1,4 +1,4 @@
-package queue
+package worker
 
 import (
 	"bytes"
@@ -6,6 +6,7 @@ import (
 
 	"github.com/borgenk/qdo/log"
 	"github.com/borgenk/qdo/store"
+	"github.com/borgenk/qdo/config"
 )
 
 type queueLine struct {
@@ -21,14 +22,14 @@ type queueLine struct {
 
 // Key format: [line id] \x00 [key type] \x00 [timestamp] \x00 [task id]
 func (q *queueLine) key(task *Task, timestamp int64) []byte {
-	return append(q.prefix, []byte(fmt.Sprintf("%d%s%s", timestamp, prefix, task.ID))...)
+	return append(q.prefix, []byte(fmt.Sprintf("%d%s%s", timestamp, config.Prefix, task.ID))...)
 }
 
 func (q *queueLine) add(task *Task, scheduled int64) error {
 	log.Infof("queue/%s/%s/task/%s - adding", q.ID, q.Type, task.ID)
 
 	task.Key = q.key(task, scheduled)
-	err = q.db.Put(task.Key, task.Serialize())
+	err := q.db.Put(task.Key, task.Serialize())
 	if err != nil {
 		log.Error(fmt.Sprintf("queue/%s/%s/task/%s - adding failed", q.ID, q.Type, task.ID), err)
 		return err

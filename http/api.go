@@ -9,8 +9,9 @@ import (
 
 	"github.com/borgenk/qdo/third_party/github.com/gorilla/mux"
 
+	"github.com/borgenk/qdo/core"
 	"github.com/borgenk/qdo/log"
-	"github.com/borgenk/qdo/queue"
+	"github.com/borgenk/qdo/worker"
 )
 
 func init() {
@@ -64,7 +65,7 @@ func ReturnJSON(w stdhttp.ResponseWriter, r *stdhttp.Request, resp interface{}) 
 
 // API handler for GET /api/queue.
 func getAllQueues(w stdhttp.ResponseWriter, r *stdhttp.Request) {
-	res, err := queue.GetAllQueues()
+	res, err := core.GetAllQueues()
 	if err != nil {
 		log.Error("", err)
 		stdhttp.Error(w, "", stdhttp.StatusInternalServerError)
@@ -90,7 +91,7 @@ func createQueue(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		stdhttp.Error(w, "", stdhttp.StatusBadRequest)
 		return
 	}
-	config := &queue.Config{}
+	config := &worker.Config{}
 
 	v, err = strconv.Atoi(r.FormValue("max_concurrent"))
 	if err != nil {
@@ -120,7 +121,7 @@ func createQueue(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		return
 	}
 	config.TaskMaxTries = int32(v)
-	err = queue.AddQueue(queueID, config)
+	err = core.AddQueue(queueID, config)
 	if err != nil {
 		log.Error("", err)
 		stdhttp.Error(w, "", stdhttp.StatusBadRequest)
@@ -132,7 +133,7 @@ func createQueue(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 func getQueue(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	vars := mux.Vars(r)
 	queueID := vars["queue_id"]
-	res, err := queue.GetQueue(queueID)
+	res, err := core.GetQueue(queueID)
 	if err != nil {
 		stdhttp.Error(w, "", stdhttp.StatusInternalServerError)
 		return
@@ -148,7 +149,7 @@ func getQueue(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 func deleteQueue(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	vars := mux.Vars(r)
 	queueID := vars["queue_id"]
-	err := queue.RemoveQueue(queueID)
+	err := core.RemoveQueue(queueID)
 	if err != nil {
 		stdhttp.Error(w, "", stdhttp.StatusInternalServerError)
 		return
@@ -160,7 +161,7 @@ func deleteQueue(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 func getAllTasks(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	vars := mux.Vars(r)
 	queueID := vars["queue_id"]
-	q, err := queue.GetQueue(queueID)
+	q, err := core.GetQueue(queueID)
 	if err != nil {
 		stdhttp.Error(w, "", stdhttp.StatusInternalServerError)
 		return
@@ -182,7 +183,7 @@ func CreateTask(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	vars := mux.Vars(r)
 	queueID := vars["queue_id"]
 
-	q, err := queue.GetQueue(queueID)
+	q, err := core.GetQueue(queueID)
 	if err != nil {
 		stdhttp.Error(w, err.Error(), stdhttp.StatusInternalServerError)
 		return
@@ -209,7 +210,7 @@ func deleteAllTasks(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	vars := mux.Vars(r)
 	queueID := vars["queue_id"]
 
-	q, err := queue.GetQueue(queueID)
+	q, err := core.GetQueue(queueID)
 	if err != nil {
 		stdhttp.Error(w, err.Error(), stdhttp.StatusInternalServerError)
 		return
@@ -237,14 +238,15 @@ type StatsResponse struct {
 	TotalProcessedRescheduled int64  `json:"total_processed_rescheduled"`
 }
 
-func (s *StatsResponse) Get(q *queue.QueueManager) {
-	s.InQueue = q.Stats.InQueue.Get()
-	s.InProcessing = q.Stats.InProcessing.Get()
-	s.InScheduled = q.Stats.InScheduled.Get()
-	s.TotalReceived = q.Stats.TotalReceived.Get()
-	s.TotalProcessedOK = q.Stats.TotalProcessedOK.Get()
-	s.TotalProcessedError = q.Stats.TotalProcessedError.Get()
-	s.TotalProcessedRescheduled = q.Stats.TotalProcessedRescheduled.Get()
+func (s *StatsResponse) Get(q *worker.QueueManager) {
+	stats := q.GetStats()
+	s.InQueue = stats.InQueue.Get()
+	s.InProcessing = stats.InProcessing.Get()
+	s.InScheduled = stats.InScheduled.Get()
+	s.TotalReceived = stats.TotalReceived.Get()
+	s.TotalProcessedOK = stats.TotalProcessedOK.Get()
+	s.TotalProcessedError = stats.TotalProcessedError.Get()
+	s.TotalProcessedRescheduled = stats.TotalProcessedRescheduled.Get()
 }
 
 // API handler for GET /api/queue/{queue_id}/stats
@@ -252,7 +254,7 @@ func getStats(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	vars := mux.Vars(r)
 	queueID := vars["queue_id"]
 
-	q, err := queue.GetQueue(queueID)
+	q, err := core.GetQueue(queueID)
 	if err != nil {
 		stdhttp.Error(w, err.Error(), stdhttp.StatusInternalServerError)
 		return
