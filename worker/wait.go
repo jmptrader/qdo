@@ -2,6 +2,8 @@ package worker
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -26,6 +28,8 @@ func NewWaitQueue(ID string, config *Config, total *AtomicInt, db store.Store, n
 		notifyReady: make(chan int, config.MaxConcurrent),
 		rewind:      sync.NewCond(&locker),
 	}
+	wq.counterTime.Set(0)
+	wq.counter.Set(0)
 	return wq
 }
 
@@ -33,6 +37,8 @@ type waitQueue struct {
 	queueLine
 	notifyReady chan int
 	rewind      *sync.Cond
+	counterTime AtomicInt
+	counter     AtomicInt
 }
 
 func (w *waitQueue) Run(fn func(*Task)) {
@@ -86,9 +92,9 @@ func (w *waitQueue) Run(fn func(*Task)) {
 
 			fn(UnserializeTask(k, v))
 
-			// Throttle task invocations per second.
+			// Throttle task invocations per second (processing + maxRate for now).
 			if w.config.MaxRate > 0 {
-				time.Sleep(time.Duration(time.Second / (time.Duration(w.config.MaxRate) * time.Second)))
+				time.Sleep(time.Duration(int64(time.Second) / int64(w.config.MaxRate)))
 			}
 		}
 
@@ -103,7 +109,17 @@ func (w *waitQueue) Run(fn func(*Task)) {
 }
 
 func (w *waitQueue) Add(task *Task) error {
-	err := w.add(task, time.Now().Unix())
+	now := time.Now().Unix()
+	if w.counter.Get() > 99999 {
+		return errors.New("Too many tasks at once")
+	}
+	if now != w.counterTime.Get() {
+		w.counterTime.Set(now)
+		w.counter.Set(0)
+	} else {
+		w.counter.Add(1)
+	}
+	err := w.add(task, fmt.Sprintf("%d%05d", now, w.counter.Get()))
 	if err != nil {
 		return err
 	}

@@ -3,6 +3,7 @@ package worker
 import (
 	"bytes"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/borgenk/qdo/log"
@@ -72,5 +73,5 @@ func (s *scheduleQueue) Run(fn func(*Task)) {
 }
 
 func (s *scheduleQueue) Add(task *Task, scheduled int64) error {
-	return s.add(task, scheduled)
+	return s.add(task, strconv.FormatInt(scheduled, 10))
 }
