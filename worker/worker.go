@@ -33,11 +33,11 @@ type Config struct {
 
 // NewQueue creates a new queue ready to handle tasks after running
 // initialize on it self.
-func NewQueue(queueID string, config *Config, db store.Store, wg *sync.WaitGroup) *QueueManager {
+func NewQueue(queueID string, configuration *Config, db store.Store, wg *sync.WaitGroup) *QueueManager {
 	q := &QueueManager{
 		ID:        queueID,
 		CreatedAt: time.Now(),
-		Config:    config,
+		Config:    configuration,
 	}
 	return q.Initialize(db, wg)
 }
@@ -170,7 +170,7 @@ func (q *QueueManager) processTask(task *Task) {
 		k := task.Key
 
 		err := task.Process(&q.ID, q.httpClient, q.Config, q.stats)
-		if err == ErrTaskMaxTries {
+		if err == ErrTaskMaxTries || err == ErrClientBadRequest {
 			// Do nothing.
 		} else if err != nil {
 			if task.Delay == 0 {
