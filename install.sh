@@ -1,5 +1,4 @@
 #!/bin/bash
-set -e
 
 # Require root user.
 if [[ $EUID -ne 0 ]]; then
@@ -8,7 +7,7 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 # Build file must exist.
-if [ ! -f "qdo" ]; then
+if [ ! -f "cmd/qdo" ]; then
     echo "QDo not found, compile with: go build"
     exit 1
 fi
@@ -17,7 +16,7 @@ fi
 if [ -f "/etc/init/qdo.conf" ]; then
     service qdo stop
 fi
-cp qdo /usr/bin/qdo
+cp cmd/qdo /usr/bin/qdo
 
 # Setup upstart script.
 cp qdo.conf /etc/init/
